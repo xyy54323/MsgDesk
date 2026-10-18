@@ -12,11 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
-import subprocess
 import sys
-import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -90,63 +86,38 @@ def configure() -> None:
     print("restart NapCat for the change to take effect: python scripts/napcat.py stop && start")
 
 
-def _pids() -> list[int]:
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command",
-         "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*vendor\\\\napcat*' "
-         "-and $_.Name -ne 'pwsh.exe' } | Select-Object -ExpandProperty ProcessId"],
-        capture_output=True, text=True,
-    )
-    return [int(line) for line in result.stdout.split() if line.strip().isdigit()]
+def _bridge():
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from msgdesk.services import qq_bridge
+
+    return qq_bridge
 
 
 def start(uin: str | None) -> None:
     if not (VENDOR / "napcat.bat").exists():
         raise SystemExit("NapCat not installed; run: python scripts/napcat.py install")
-    if _pids():
+    bridge = _bridge()
+    if bridge.running():
         print("already running")
         return
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    args = [str(VENDOR / "napcat.bat")]
-    if uin:
-        args += ["-q", uin]
-    subprocess.Popen(
-        args,
-        cwd=str(VENDOR),
-        stdout=open(LOG_DIR / "napcat.log", "w", encoding="utf-8"),
-        stderr=open(LOG_DIR / "napcat.err.log", "w", encoding="utf-8"),
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    bridge.start(uin)
     print(f"started; log: {LOG_DIR / 'napcat.log'}")
     print(f"QR code (if login needed): {VENDOR / 'napcat' / 'cache' / 'qrcode.png'}")
 
 
 def stop() -> None:
-    pids = _pids()
-    if not pids:
+    bridge = _bridge()
+    if not bridge.running():
         print("not running")
         return
-    for pid in pids:
-        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
-    print(f"stopped {len(pids)} process(es)")
+    bridge.stop()
+    print("stopped")
 
 
 def status() -> None:
-    pids = _pids()
-    print("running" if pids else "stopped")
-    request = urllib.request.Request(
-        "http://127.0.0.1:3000/get_group_list",
-        data=b"{}",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        groups = data.get("data") or []
-        print(f"onebot ok, {len(groups)} groups")
-    except Exception as exc:  # noqa: BLE001
-        print(f"onebot unreachable: {exc}")
+    bridge = _bridge()
+    print(json.dumps(bridge.state(), ensure_ascii=False, indent=2))
 
 
 def main() -> None:

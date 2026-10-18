@@ -360,8 +360,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         if path == "/api/qq/qr" and method == "GET":
             from ..services import qq_bridge
 
-            if not qq_bridge.QR_PATH.exists():
-                raise AppError("NOT_FOUND", "还没有二维码，稍后再试")
+            if not qq_bridge.qr_ready():
+                raise AppError("NOT_FOUND", "二维码正在生成，稍后再试")
             body = qq_bridge.QR_PATH.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
@@ -370,6 +370,17 @@ class ApiHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return None
+
+        if path == "/api/qq/qr/refresh" and method == "POST":
+            from ..services import qq_bridge
+
+            try:
+                refreshed = qq_bridge.refresh_qr()
+            except RuntimeError as exc:
+                raise AppError("REMOTE_TEMPORARY_ERROR", str(exc)) from exc
+            if not refreshed:
+                raise AppError("REMOTE_TEMPORARY_ERROR", "二维码刷新超时，请稍后再试")
+            return 200, qq_bridge.state()
 
         groups_match = re.fullmatch(r"/api/sources/([^/]+)/groups", path)
         if groups_match and method == "POST":

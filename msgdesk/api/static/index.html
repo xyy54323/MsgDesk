@@ -2595,9 +2595,11 @@ function renderSourceConfigFields(type, config) {
       <div class="qq-login">
         <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
           <span id="qqLoginStatus" class="muted tiny">正在检查 QQ 服务…</span>
+          <button type="button" class="btn tiny" onclick="refreshQqQr()">刷新二维码</button>
           <button type="button" class="btn tiny" onclick="reloginQq()">重新登录</button>
         </div>
-        <img id="qqQr" alt="QQ 登录二维码" style="display:none;width:180px;height:180px;border:2px solid var(--line);margin-top:8px">
+        <img id="qqQr" alt="QQ 登录二维码" onerror="this.style.display='none'"
+             style="display:none;width:180px;height:180px;border:2px solid var(--line);margin-top:8px">
       </div>
     </div>`;
     html += `<div class="field">
@@ -2640,7 +2642,7 @@ function renderSourceConfigFields(type, config) {
         .map(String)
     );
     renderQqGroups();
-    checkQqLogin();
+    ensureQqReady();
   }
   if (type === 'ai_web') {
     state.promptFiles = Array.isArray(values.prompt_files) ? values.prompt_files.slice() : [];
@@ -2664,10 +2666,12 @@ async function refreshVisionSupport() {
 }
 
 let qqLoginTimer = null;
+let qqQrStamp = null;
 
 async function reloginQq() {
   const status = document.getElementById('qqLoginStatus');
   if (status) status.textContent = '正在重启 QQ 服务，稍等…';
+  qqQrStamp = null;
   state.qqGroups = [];
   state.qqSelected.clear();
   const box = document.getElementById('qqGroupList');
@@ -2680,14 +2684,39 @@ async function reloginQq() {
   setTimeout(checkQqLogin, 4000);
 }
 
+async function ensureQqReady() {
+  const status = document.getElementById('qqLoginStatus');
+  if (status) status.textContent = '正在连接本机 QQ 服务…';
+  const result = await apiResult('/api/qq/status');
+  if (!result.ok) {
+    if (status) status.textContent = `QQ 服务启动失败：${result.data.message || ''}`;
+    return;
+  }
+  checkQqLogin();
+}
+
+async function refreshQqQr() {
+  const status = document.getElementById('qqLoginStatus');
+  if (status) status.textContent = '正在刷新二维码…';
+  const result = await apiResult('/api/qq/qr/refresh', { method: 'POST', body: '{}' });
+  if (!result.ok) {
+    if (status) status.textContent = `刷新二维码失败：${result.data.message || ''}`;
+    qqLoginTimer = setTimeout(checkQqLogin, 4000);
+    return;
+  }
+  qqQrStamp = null;
+  checkQqLogin();
+}
+
 async function checkQqLogin() {
   const status = document.getElementById('qqLoginStatus');
   const image = document.getElementById('qqQr');
   if (!status || !image) return;
   clearTimeout(qqLoginTimer);
-  const result = await apiResult('/api/qq/status');
+  const result = await apiResult('/api/qq/state');
   if (!result.ok) {
     status.textContent = `QQ 服务检查失败：${result.data.message || ''}`;
+    qqLoginTimer = setTimeout(checkQqLogin, 5000);
     return;
   }
   const data = result.data;
@@ -2696,10 +2725,24 @@ async function checkQqLogin() {
     image.style.display = 'none';
     return;
   }
+  if (!data.running) {
+    status.textContent = 'QQ 服务未运行，正在启动…';
+    image.style.display = 'none';
+    qqQrStamp = null;
+    await apiResult('/api/qq/status');
+    qqLoginTimer = setTimeout(checkQqLogin, 2500);
+    return;
+  }
   if (data.logged_in) {
     state.qqLoggedIn = true;
-    status.textContent = `已登录：${data.name || 'QQ'}（${data.uin}）`;
     image.style.display = 'none';
+    if (!data.uin) {
+      status.textContent = '已登录，正在接通群列表…';
+      qqLoginTimer = setTimeout(checkQqLogin, 2000);
+      return;
+    }
+    const who = data.name || data.uin || 'QQ';
+    status.textContent = data.uin ? `已登录：${who}（${data.uin}）` : `已登录：${who}`;
     loadQqGroups();
     return;
   }
@@ -2710,11 +2753,30 @@ async function checkQqLogin() {
   if (box) {
     box.innerHTML = '<div class="muted tiny" style="padding:10px">登录后自动加载群列表</div>';
   }
-  status.textContent = '用手机 QQ 扫码登录（登录后这里会自动继续）';
-  const token = encodeURIComponent(state.token || '');
-  image.src = `/api/qq/qr?token=${token}&t=${Date.now()}`;
-  image.style.display = 'block';
-  qqLoginTimer = setTimeout(checkQqLogin, 3000);
+  const left = Math.max(0, Number(data.qr_left || 0));
+  if (data.scanned && data.phase === 'initializing') {
+    status.textContent = '已确认，正在完成登录…';
+  } else if (data.scanned) {
+    status.textContent = '已扫码，请在手机上点确认登录';
+  } else if (data.error) {
+    status.textContent = `扫码登录失败：${data.error}`;
+  } else if (!data.qr_ready) {
+    status.textContent = '正在生成二维码…';
+  } else {
+    status.textContent = `用手机 QQ 扫码登录 · 二维码 ${left} 秒后自动换新`;
+  }
+  if (data.qr_ready) {
+    if (qqQrStamp !== data.qr_mtime) {
+      qqQrStamp = data.qr_mtime;
+      const token = encodeURIComponent(state.token || '');
+      image.src = `/api/qq/qr?token=${token}&v=${data.qr_mtime}`;
+    }
+    image.style.display = 'block';
+  } else {
+    image.style.display = 'none';
+    qqQrStamp = null;
+  }
+  qqLoginTimer = setTimeout(checkQqLogin, 2000);
 }
 
 function renderQqGroups() {
