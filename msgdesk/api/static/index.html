@@ -382,6 +382,15 @@
     box-sizing: border-box; width: 100%; height: 32px; min-height: 32px;
     padding: 0 9px; line-height: 28px; font-size: 12px;
   }
+  .date-row { display: flex; align-items: stretch; gap: 6px; }
+  .date-row input {
+    box-sizing: border-box; width: 132px; height: 32px; min-height: 32px;
+    padding: 0 9px; line-height: 28px; font-size: 12px;
+  }
+  .date-row .btn {
+    box-sizing: border-box; height: 32px; min-height: 32px;
+    padding: 0 10px; font-size: 12px; line-height: 28px;
+  }
   .qq-dropdown {
     display: none; position: absolute; left: 0; right: 0; top: 36px; z-index: 30;
     max-height: 220px; overflow: auto;
@@ -1288,7 +1297,11 @@ function buildDatePicker(anchor, current, onPick) {
   });
 
   const rect = anchor.getBoundingClientRect();
-  panel.style.top = `${window.scrollY + rect.bottom + 6}px`;
+  const height = panel.offsetHeight;
+  const openUp = window.innerHeight - rect.bottom < height + 12 && rect.top > height + 12;
+  panel.style.top = openUp
+    ? `${window.scrollY + rect.top - height - 6}px`
+    : `${window.scrollY + rect.bottom + 6}px`;
   const maxLeft = document.documentElement.clientWidth - 280;
   panel.style.left = `${window.scrollX + Math.max(8, Math.min(rect.left, maxLeft))}px`;
 }
@@ -2678,9 +2691,9 @@ function renderSourceConfigFields(type, config) {
     </div>
     <div class="field">
       <span class="field-title">从哪天开始回补</span>
-      <span class="row" style="gap:6px">
+      <span class="date-row">
         <input id="cfgHistoryFrom" readonly placeholder="YYYY-MM-DD"
-               value="${esc(values.history_from || '')}" style="width:132px"
+               value="${esc(values.history_from || '')}"
                onclick="pickHistoryDate()">
         <button type="button" class="btn tiny" onclick="pickHistoryDate()">选择日期</button>
       </span>
