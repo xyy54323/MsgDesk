@@ -2574,6 +2574,7 @@ function renderSourceConfigFields(type, config) {
       <summary>要采集的群 <span class="muted tiny" id="qqGroupHint">正在读取…</span></summary>
       <div class="qq-group-tools">
         <button type="button" class="btn tiny" onclick="loadQqGroups()">刷新群列表</button>
+        <button type="button" class="btn tiny" onclick="clearQqGroups()">清空已选</button>
         <input id="qqGroupSearch" placeholder="搜索群名或群号" oninput="renderQqGroups()">
       </div>
       <div id="qqGroupList" class="qq-group-list"></div>
@@ -2706,11 +2707,19 @@ function renderQqGroups() {
   }
   const input = document.getElementById('cfgConversations');
   if (input) input.value = Array.from(state.qqSelected || []).join(',');
+  const loaded = (state.qqGroups || []).length > 0;
   if (hint) {
     hint.textContent = state.qqSelected.size
-      ? `已选 ${state.qqSelected.size} 个群`
-      : '还没选群';
+      ? (loaded
+          ? `已选 ${state.qqSelected.size} 个群`
+          : `已保存 ${state.qqSelected.size} 个群（登录后显示）`)
+      : (loaded ? '还没选群' : '登录后加载群列表');
   }
+}
+
+function clearQqGroups() {
+  state.qqSelected.clear();
+  renderQqGroups();
 }
 
 function toggleQqGroup(id) {
