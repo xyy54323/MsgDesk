@@ -5,21 +5,31 @@
 
 ## 运行
 
-打包版（推荐，不需要装 Python）：
+安装版（推荐，不需要装 Python）：
 
 ```text
-解压 MsgDesk-win64.zip
-双击 Start-MsgDesk.cmd
+双击 MsgDesk-Setup-0.1.0.exe
+选择安装位置（默认 %LOCALAPPDATA%\Programs\MsgDesk）
+安装完成后自动打开 MsgDesk 窗口（不是浏览器）
 ```
 
-第一次启动会自动生成 `config.json` 和数据库，并打开
-`http://127.0.0.1:8080/?token=...`。数据、日报、日志都在这个文件夹里，
-整个文件夹拷走就能迁移。
+第一次启动会自动生成 `config.json` 和数据库。窗口用系统自带的 WebView2
+（和 Typora、VS Code 同一类做法），有独立标题栏和任务栏图标，不经过浏览器地址栏。
+数据、日报、日志都在安装目录里，
+整个文件夹拷走就能迁移；卸载会保留 `config.json`、`data`、`digests`。
+
+不想安装也可以直接用绿色包：解压 `MsgDesk-win64.zip`，双击 `MsgDesk.exe`。
+
+安装目录里有两个 exe：
+
+- `MsgDesk.exe`：双击直接进桌面窗口
+- `MsgDesk-cli.exe`：命令行版，`MsgDesk-cli.exe napcat status` 这类诊断用它
 
 从源码运行：
 
 ```powershell
 python -m msgdesk --config .\config.json serve
+python -m msgdesk --config .\config.json serve --desktop   # 桌面窗口
 ```
 
 `msgdesk.cmd` / `msgdesk.ps1` 会自动找 Python（包内 `runtime\python` → `.venv`
@@ -29,11 +39,18 @@ python -m msgdesk --config .\config.json serve
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_package.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
 ```
 
-产物是 `dist\MsgDesk-win64.zip`（约 11MB，不含 QQ 桥）。常用开关：
+产物：
 
-- `-WithNapCat`：把 `vendor\napcat` 一起打进去（包会变成 350MB 左右，适合离线交付）
+- `dist\MsgDesk\`：免安装的完整目录，双击 `MsgDesk.exe` 就能跑
+- `dist\MsgDesk-win64.zip`：上面那个目录的压缩包
+- `dist\MsgDesk-Setup-0.1.0.exe`：带安装向导，可选安装位置
+
+常用开关：
+
+- `-SkipNapCat`：不打 QQ 桥（包会降到 11MB 左右，首次用时再下载）
 - `-WithBrowser`：把 Playwright 和 Chromium 打进包（网站登录用，约 +150MB）
 - `-NoZip`：只产出 `dist\MsgDesk` 目录
 

@@ -14,7 +14,10 @@ $Package = (Resolve-Path $Package).Path
 $work = Join-Path $root "dist\_smoke"
 
 if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }
-Copy-Item -LiteralPath $Package -Destination $work -Recurse
+New-Item -ItemType Directory -Path $work -Force | Out-Null
+# Skip the 345MB QQ bridge: the UI smoke test only needs the app itself.
+robocopy $Package $work /E /XD (Join-Path $Package "vendor") /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "Failed to copy package" }
 
 $config = Get-Content (Join-Path $work "config.example.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $config.system.port = $Port
@@ -25,7 +28,7 @@ $json = $config | ConvertTo-Json -Depth 20
     (New-Object System.Text.UTF8Encoding($false))
 )
 
-$exe = Join-Path $work "MsgDesk.exe"
+$exe = Join-Path $work "MsgDesk-cli.exe"
 $process = Start-Process -FilePath $exe -ArgumentList "serve" -WorkingDirectory $work -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $work "smoke.out.log") `
     -RedirectStandardError (Join-Path $work "smoke.err.log")

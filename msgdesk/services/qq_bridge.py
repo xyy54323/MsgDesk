@@ -54,6 +54,7 @@ HTTP_CONFIG = {
 
 _credential: dict[str, Any] = {"value": "", "at": 0.0, "port": 0}
 _last_auto_refresh = 0.0
+_last_onebot_restart = 0.0
 _pid_cache: dict[str, Any] = {"at": 0.0, "pids": []}
 _port_cache: dict[str, Any] = {"at": 0.0, "port": None}
 
@@ -253,6 +254,18 @@ def login_phase() -> dict[str, Any]:
         return {}
 
 
+def webui_login_info() -> dict[str, Any]:
+    """Account info straight from the WebUI (works before OneBot is wired)."""
+    try:
+        data = webui_call("/QQLogin/GetQQLoginInfo")
+    except (RuntimeError, urllib.error.URLError, OSError):
+        return {}
+    return {
+        "uin": str(data.get("uin") or ""),
+        "name": str(data.get("nick") or ""),
+    }
+
+
 def refresh_qr(wait: bool = True) -> bool:
     """Ask NapCat for a brand new QR code.
 
@@ -388,6 +401,7 @@ def state() -> dict[str, Any]:
 
 def ensure_ready() -> dict[str, Any]:
     """Start NapCat if needed, wire the endpoint, and report the login state."""
+    global _last_onebot_restart
     if not installed():
         return {
             "installed": False, "running": False, "logged_in": False,
@@ -403,15 +417,29 @@ def ensure_ready() -> dict[str, Any]:
         while time.time() < deadline and not running():
             time.sleep(0.5)
     info = login_info()
-    if info and configure_onebot():
-        stop()
-        time.sleep(1)
-        QR_PATH.unlink(missing_ok=True)
-        start(info["uin"])
-        for _ in range(20):
+    phase = {} if info else login_phase()
+    logged = bool(info) or bool(phase.get("isLogin"))
+    if logged and not info:
+        # QQ is logged in but the OneBot HTTP endpoint is not answering.  On a
+        # fresh install the account config is created by NapCat during login,
+        # so wire port 3000 and restart once with the account for quick login.
+        who = webui_login_info()
+        changed = configure_onebot()
+        if not changed:
+            time.sleep(2)
+            changed = configure_onebot()
+        now = time.time()
+        if changed or now - _last_onebot_restart > 40:
+            _last_onebot_restart = now
+            stop()
             time.sleep(1)
-            if login_info():
-                break
+            QR_PATH.unlink(missing_ok=True)
+            start(who.get("uin") or None)
+            for _ in range(15):
+                time.sleep(1)
+                info = login_info()
+                if info:
+                    break
     data = state()
     data["installed"] = True
     return data

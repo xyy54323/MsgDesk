@@ -1,14 +1,14 @@
 # Build the portable MsgDesk package (Windows first, same flow per OS later).
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\build_package.ps1
+#   ... -SkipNapCat      do not bundle the QQ bridge
 #   ... -WithBrowser     also bundle Playwright + Chromium (site login)
-#   ... -WithNapCat      also copy vendor\napcat into the package (~345MB)
 #   ... -NoZip           keep dist\MsgDesk and skip zipping
 
 param(
     [string]$Python = "",
+    [switch]$SkipNapCat,
     [switch]$WithBrowser,
-    [switch]$WithNapCat,
     [switch]$NoZip
 )
 
@@ -46,43 +46,35 @@ foreach ($path in @("build", "dist\MsgDesk")) {
 }
 
 Write-Host "[3/5] Running PyInstaller"
+$env:MSGDESK_WITH_BROWSER = if ($WithBrowser) { "1" } else { "0" }
 $buildArgs = @(
     "-m", "PyInstaller",
-    "--noconfirm", "--clean", "--onedir", "--console",
-    "--name", "MsgDesk",
-    "--collect-data", "msgdesk",
-    "--paths", ".",
+    "--noconfirm", "--clean",
     "--distpath", "dist",
     "--workpath", "build",
-    "--specpath", "build",
-    "packaging/entry.py"
+    "packaging/MsgDesk.spec"
 )
-if (-not $WithBrowser) {
-    $buildArgs += @("--exclude-module", "playwright")
-}
 & $python @buildArgs
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
+Remove-Item Env:\MSGDESK_WITH_BROWSER -ErrorAction SilentlyContinue
 
 $out = Join-Path $root "dist\MsgDesk"
-Write-Host "[4/5] Copying config template and launcher"
+Write-Host "[4/5] Copying config template"
 Copy-Item (Join-Path $root "config.example.json") (Join-Path $out "config.example.json") -Force
 Copy-Item (Join-Path $root "README.md") (Join-Path $out "README.md") -Force
 
-$launcher = @"
-@echo off
-cd /d "%~dp0"
-if not exist config.json MsgDesk.exe init
-MsgDesk.exe serve --open
-if errorlevel 1 pause
-"@
-Set-Content -Path (Join-Path $out "Start-MsgDesk.cmd") -Value $launcher -Encoding OEM
-
-if ($WithNapCat) {
+if (-not $SkipNapCat) {
     if (-not (Test-Path (Join-Path $root "vendor\napcat\napcat.bat"))) {
         throw "vendor\napcat not found; run MsgDesk.exe napcat install first"
     }
-    Write-Host "      Copying NapCat (~345MB)"
-    robocopy (Join-Path $root "vendor\napcat") (Join-Path $out "vendor\napcat") /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    Write-Host "      Copying NapCat (~345MB, account config stripped)"
+    $source = Join-Path $root "vendor\napcat"
+    $target = Join-Path $out "vendor\napcat"
+    # Never ship this machine's QQ session: config/cache/logs belong to the user.
+    robocopy $source $target /E `
+        /XD (Join-Path $source "napcat\config") (Join-Path $source "napcat\cache") (Join-Path $source "napcat\logs") `
+        /XF "beacon_report.log" "stdout*.log" "stderr*.log" "*.db" "*.db-shm" "*.db-wal" `
+        /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Failed to copy NapCat" }
 }
 

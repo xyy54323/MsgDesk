@@ -439,7 +439,8 @@ class Repository:
                 "LEFT JOIN conversations c ON c.id = m.conversation_id "
                 "LEFT JOIN message_processing p ON p.message_id = m.id AND p.is_current = 1 "
                 "WHERE m.deleted_at IS NULL AND m.ignored_at IS NULL "
-                "AND m.collected_at >= ? AND m.collected_at < ? "
+                "AND COALESCE(m.published_at, m.collected_at) >= ? "
+                "AND COALESCE(m.published_at, m.collected_at) < ? "
                 "ORDER BY m.published_at",
                 (start, end),
             ).fetchall()
@@ -457,7 +458,8 @@ class Repository:
                 "LEFT JOIN conversations c ON c.id = m.conversation_id "
                 "WHERE m.deleted_at IS NULL AND m.ignored_at IS NULL "
                 "AND m.source_id = ? AND m.conversation_id = ? "
-                "AND m.collected_at >= ? AND m.collected_at < ? "
+                "AND COALESCE(m.published_at, m.collected_at) >= ? "
+                "AND COALESCE(m.published_at, m.collected_at) < ? "
                 "ORDER BY m.published_at",
                 (source_id, conversation_id, start, end),
             ).fetchall()

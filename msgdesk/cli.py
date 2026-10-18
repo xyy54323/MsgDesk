@@ -89,6 +89,12 @@ def setup_logging(config: AppConfig) -> None:
 
 def _configure_stdio() -> None:
     """Use UTF-8 for Chinese output on Windows consoles and redirected logs."""
+    if sys.stdout is None or sys.stderr is None:
+        # Windowed PyInstaller build: keep prints harmless.
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
     if os.name == "nt":
         try:
             import ctypes
@@ -115,6 +121,7 @@ def _parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="启动 API、调度器和任务 worker")
     serve.add_argument("--no-scheduler", action="store_true", help="只启动 API 和 worker")
     serve.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
+    serve.add_argument("--desktop", action="store_true", help="用桌面窗口打开（WebView2）")
 
     sync = sub.add_parser("sync", help="立即同步来源")
     sync.add_argument("--source", help="来源 ID；省略时同步全部启用来源")
@@ -145,9 +152,16 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     _configure_stdio()
-    from .paths import configure_runtime_env
+    from .paths import app_root, configure_runtime_env, is_frozen
 
     configure_runtime_env()
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv and is_frozen():
+        # Double-click: first run prepares the workspace, then opens the UI.
+        if not (app_root() / "config.json").exists():
+            cmd_init(None)
+        argv = ["serve", "--desktop"]
     args = _parser().parse_args(argv)
     try:
         if args.command == "init":
@@ -160,7 +174,12 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_config_check(config)
         runtime = Runtime(config)
         if args.command == "serve":
-            return cmd_serve(runtime, no_scheduler=args.no_scheduler, open_browser=args.open)
+            return cmd_serve(
+                runtime,
+                no_scheduler=args.no_scheduler,
+                open_browser=args.open,
+                desktop=args.desktop,
+            )
         if args.command == "sync":
             return cmd_sync(runtime, args.source, args.max_items)
         if args.command == "digest":
@@ -244,7 +263,13 @@ def cmd_config_check(config: AppConfig) -> int:
     return 0
 
 
-def cmd_serve(runtime: Runtime, *, no_scheduler: bool = False, open_browser: bool = False) -> int:
+def cmd_serve(
+    runtime: Runtime,
+    *,
+    no_scheduler: bool = False,
+    open_browser: bool = False,
+    desktop: bool = False,
+) -> int:
     from .api.server import create_server
 
     config = runtime.config
@@ -267,6 +292,35 @@ def cmd_serve(runtime: Runtime, *, no_scheduler: bool = False, open_browser: boo
         print(f"访问令牌见: {config.data_dir / 'api_token.txt'}", flush=True)
     print(f"数据库: {config.db_path}", flush=True)
     print("按 Ctrl+C 停止。", flush=True)
+    if desktop:
+        try:
+            import webview
+        except Exception as exc:  # noqa: BLE001 - fall back to the browser
+            print(f"桌面窗口不可用（{exc}），改用浏览器打开。", flush=True)
+            desktop = False
+            open_browser = True
+    if desktop:
+        import threading
+
+        thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True
+        )
+        thread.start()
+        target = f"http://{host}:{port}/?token={token}" if token else f"http://{host}:{port}/"
+        webview.create_window(
+            "MsgDesk 个人消息工作台",
+            target,
+            width=1440,
+            height=920,
+            min_size=(1100, 700),
+        )
+        try:
+            webview.start()
+        finally:
+            runtime.stop()
+            server.shutdown()
+            server.server_close()
+        return 0
     if open_browser:
         import threading
         import webbrowser

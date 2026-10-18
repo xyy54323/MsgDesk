@@ -2667,6 +2667,7 @@ async function refreshVisionSupport() {
 
 let qqLoginTimer = null;
 let qqQrStamp = null;
+let qqWiring = false;
 
 async function reloginQq() {
   const status = document.getElementById('qqLoginStatus');
@@ -2754,6 +2755,10 @@ async function checkQqLogin() {
     image.style.display = 'none';
     if (!data.uin) {
       status.textContent = '已登录，正在接通群列表…';
+      if (!qqWiring) {
+        qqWiring = true;
+        apiResult('/api/qq/status').finally(() => { qqWiring = false; });
+      }
       qqLoginTimer = setTimeout(checkQqLogin, 2000);
       return;
     }
