@@ -2677,13 +2677,9 @@ function renderSourceConfigFields(type, config) {
       <span class="muted tiny">写给模型看：每个群每天汇总时按这个要求整理。</span>
     </div>
     <div class="field">
-      <span class="field-title">起止日期</span>
-      <span class="row" style="align-items:center;gap:8px">
-        <input id="cfgHistoryFrom" type="date" value="${esc(values.history_from || '')}" style="width:auto">
-        <span class="muted tiny">到</span>
-        <input id="cfgHistoryTo" type="date" value="${esc(values.history_to || localToday())}" style="width:auto">
-      </span>
-      <span class="muted tiny">填起始日期即可，结束日期默认当天；下次同步会自动回补这段群消息，并按天各生成一份日报。</span>
+      <span class="field-title">从哪天开始回补</span>
+      <input id="cfgHistoryFrom" type="date" value="${esc(values.history_from || '')}" style="width:auto">
+      <span class="muted tiny">只填起始日期，自动补到今天；下次同步按天各生成一份日报。</span>
     </div>
     <p class="muted tiny" style="grid-column:1/-1;margin:2px 0 0">
       工作台会自动连接本机的 QQ 服务（NapCat，端口 3000），不需要你填写地址或口令。
@@ -3093,7 +3089,7 @@ async function saveSourceForm(event) {
       .split(/[,，\s]+/).map(item => item.trim()).filter(Boolean);
     config.prompt = value('cfgPrompt');
     config.history_from = value('cfgHistoryFrom');
-    config.history_to = value('cfgHistoryTo');
+    delete config.history_to;
     delete config.history_imported_at;
     delete config.history_imported_from;
     delete config.history_imported_to;
