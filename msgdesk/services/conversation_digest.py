@@ -1,4 +1,4 @@
-"""One model call per group per day, instead of one call per message."""
+"""One model call per group per sync cycle, instead of one per message."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ log = logging.getLogger("msgdesk.conversation_digest")
 MAX_TRANSCRIPT_CHARS = 8000
 
 SYSTEM_PROMPT = (
-    "你在帮我整理群聊。给你的是某个群一天的聊天记录（可能很零散）。\n"
+    "你在帮我整理群聊。给你的是某个群当天的聊天记录（可能很零散）。\n"
     "请输出 Markdown 要点：\n"
     "1. 先用一句话说明这个群今天主要在聊什么；\n"
-    "2. 再列 3~8 条要点，合并同类话题，忽略寒暄和表情；\n"
+    "2. 再按话题合并成 3~8 条要点；\n"
     "3. 如果有明确的通知、时间、截止日期、链接或需要我做的事，单独列出来。\n"
     "不要编造记录里没有的信息；没有实质内容就直说。"
 )

@@ -14,7 +14,7 @@ from ..config import AppConfig
 from ..errors import AppError
 from ..models import Cursor
 from ..repository import Repository, dumps, loads, new_id
-from ..timeutil import iso_utc, utc_now
+from ..timeutil import iso_utc, local_date_of, utc_now
 from .normalize import clean_text, content_hash, infer_content_type
 
 PLATFORM_DEDUPE_WINDOW = timedelta(days=30)
@@ -99,6 +99,8 @@ class SyncService:
                  "merged": 0, "failed": 0}
         raw_dir = self._raw_dir()
         now = iso_utc()
+        qq_slices: set[tuple[str, str]] = set()
+        is_qq = source_row["adapter_type"] == "qq_onebot"
         with self.repo.db.connection() as conn:
             for raw in result.messages:
                 try:
@@ -174,18 +176,42 @@ class SyncService:
                             "content_hash": digest,
                         },
                     )
-                    self.repo.enqueue_job(
-                        "process_message",
-                        message_id=message_id,
-                        source_id=source_id,
-                        payload={},
-                        priority=80,
-                        trace_id=trace_id,
-                        conn=conn,
-                    )
+                    if is_qq:
+                        # Group chats are summarised per conversation, once
+                        # per sync cycle, instead of one call per message.
+                        qq_slices.add((
+                            conversation_id,
+                            local_date_of(raw.published_at, self.config.system.timezone),
+                        ))
+                    else:
+                        self.repo.enqueue_job(
+                            "process_message",
+                            message_id=message_id,
+                            source_id=source_id,
+                            payload={},
+                            priority=80,
+                            trace_id=trace_id,
+                            conn=conn,
+                        )
                     stats["inserted"] += 1
                 except Exception:
                     stats["failed"] += 1
+            for conversation_id, date_text in sorted(qq_slices):
+                if self.repo.open_job_exists(
+                    "summarize_conversation",
+                    source_id,
+                    conversation_id=conversation_id,
+                    date=date_text,
+                ):
+                    continue
+                self.repo.enqueue_job(
+                    "summarize_conversation",
+                    source_id=source_id,
+                    payload={"conversation_id": conversation_id, "date": date_text},
+                    priority=90,
+                    trace_id=trace_id,
+                    conn=conn,
+                )
             if result.next_cursor is not None:
                 next_cursor = result.next_cursor
                 self.repo.save_cursor(

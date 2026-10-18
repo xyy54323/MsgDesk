@@ -65,16 +65,23 @@ class DigestService:
             messages,
             key=lambda m: (PRIORITY_RANK.get(self._priority(m), 2), m["published_at"]),
         )
+        by_category: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        by_source: Counter[str] = Counter()
+        conversations: dict[str, list[dict[str, Any]]] = {}
+        others: list[dict[str, Any]] = []
+        for message in ordered:
+            by_source[message.get("source_name") or "未知来源"] += 1
+            if message.get("source_type") == "qq_onebot":
+                key = str(message.get("conversation_id") or "")
+                conversations.setdefault(key, []).append(message)
+            else:
+                others.append(message)
+                by_category[message.get("category") or "其他"].append(message)
         pending = [
-            m for m in ordered
+            m for m in others
             if m.get("processing_status") in ("pending", "processing", "failed")
             or (m.get("processing_result") in ("fallback", "failed"))
         ]
-        by_category: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        by_source: Counter[str] = Counter()
-        for message in ordered:
-            by_category[message.get("category") or "其他"].append(message)
-            by_source[message.get("source_name") or "未知来源"] += 1
 
         lines: list[str] = [
             f"# {date_text} 消息摘要",
@@ -89,9 +96,28 @@ class DigestService:
             "",
         ]
         lines.extend(["## 今日待办", ""])
-        todos = self._todos(ordered)
+        todos = self._todos(others)
         lines.extend(todos or ["- 暂无提取到待办事项"])
-        lines.extend(["", "## 按主题汇总", ""])
+        lines.extend(["", "## 群聊摘要", ""])
+        summaries = {
+            str(item.get("conversation_id")): item
+            for item in self.repo.conversation_digests_for_day(date_text)
+        }
+        if not conversations:
+            lines.extend(["- 无", ""])
+        for conversation_id, items in conversations.items():
+            name = next(
+                (item.get("conversation_name") for item in items if item.get("conversation_name")),
+                "群聊",
+            )
+            lines.append(f"### {self._escape(str(name))}（{len(items)} 条）")
+            lines.append("")
+            summary = (summaries.get(conversation_id) or {}).get("summary_md") or "（摘要生成中）"
+            lines.extend(str(summary).strip().splitlines() or ["（摘要生成中）"])
+            lines.append("")
+        lines.extend(["## 按主题汇总", ""])
+        if not by_category:
+            lines.extend(["- 无", ""])
         for category in sorted(by_category):
             lines.append(f"### {category}")
             lines.append("")
@@ -109,16 +135,6 @@ class DigestService:
                 )
         else:
             lines.append("- 无")
-        lines.extend(["", "## 原始消息索引", ""])
-        for message in sorted(messages, key=lambda m: m["published_at"]):
-            when = self._local_time(message["published_at"], zone)
-            link = message.get("source_url")
-            title = self._plain(message)
-            suffix = f" — [原文]({link})" if link else ""
-            lines.append(
-                f"- {when}｜{message.get('source_name', '')}｜{title}"
-                f"（`{message['id'][:8]}`）{suffix}"
-            )
         lines.append("")
         return "\n".join(lines)
 

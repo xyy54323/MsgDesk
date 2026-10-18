@@ -495,6 +495,20 @@ class Repository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def open_job_exists(self, job_type: str, source_id: str, **match: Any) -> bool:
+        """True when a matching pending/running job is already queued."""
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM jobs WHERE type = ? AND source_id = ? "
+                "AND status IN ('pending', 'running')",
+                (job_type, source_id),
+            ).fetchall()
+        for row in rows:
+            payload = loads(row["payload_json"]) or {}
+            if all(str(payload.get(key)) == str(value) for key, value in match.items()):
+                return True
+        return False
+
     def update_message_status(self, message_id: str, status: str) -> None:
         with self.db.connection() as conn:
             conn.execute(
