@@ -91,9 +91,9 @@ class MigrationTests(unittest.TestCase):
     def test_migrations_are_idempotent_and_tables_exist(self):
         with TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "test.db")
-            self.assertEqual(db.migrate(), [1, 2, 3, 4, 5, 6])
+            self.assertEqual(db.migrate(), [1, 2, 3, 4, 5, 6, 7])
             self.assertEqual(db.migrate(), [])
-            self.assertEqual(db.schema_version(), 6)
+            self.assertEqual(db.schema_version(), 7)
             with db.connection() as conn:
                 tables = {
                     row[0]

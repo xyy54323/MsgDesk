@@ -10,6 +10,7 @@ from typing import Any
 from ..errors import AppError
 from ..repository import Repository, loads
 from .digest import DigestService
+from .conversation_digest import ConversationDigestService
 from .notifications import NotificationService
 from .processing import ProcessingService
 from .sync import SyncService
@@ -25,12 +26,14 @@ class Worker:
         processing_service: ProcessingService,
         digest_service: DigestService,
         notification_service: NotificationService,
+        conversation_digest_service: ConversationDigestService | None = None,
     ):
         self.repo = repo
         self.sync_service = sync_service
         self.processing_service = processing_service
         self.digest_service = digest_service
         self.notification_service = notification_service
+        self.conversation_digest_service = conversation_digest_service
 
     def run_once(self) -> bool:
         job = self.repo.claim_next_job()
@@ -78,6 +81,16 @@ class Worker:
             self.processing_service.process(
                 message_id, force=bool(payload.get("force")), raise_on_model_error=True
             )
+        elif job_type == "summarize_conversation":
+            source_id = job.get("source_id") or payload.get("source_id")
+            conversation_id = str(payload.get("conversation_id") or "")
+            date_text = str(payload.get("date") or "")
+            if not source_id or not conversation_id or not date_text:
+                raise AppError("VALIDATION_ERROR", "summarize_conversation 缺少参数")
+            if self.conversation_digest_service is not None:
+                self.conversation_digest_service.summarize(
+                    source_id, conversation_id, date_text
+                )
         elif job_type == "generate_digest":
             summary = self.digest_service.generate(payload.get("date"))
             self.notification_service.notify_digest(summary["date"], summary)

@@ -242,6 +242,29 @@ class QQOneBotAdapter(BaseAdapter):
                 break
         return collected
 
+    def list_groups(self, source: SourceContext) -> list[dict[str, str]]:
+        """Groups the logged-in account has joined, for the picker."""
+        parsed = self._call(source, "get_group_list", {})
+        rows = parsed.get("data")
+        if not isinstance(rows, list):
+            return []
+        groups: list[dict[str, str]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            group_id = str(row.get("group_id") or "").strip()
+            if not group_id:
+                continue
+            groups.append(
+                {
+                    "id": group_id,
+                    "name": str(row.get("group_name") or group_id),
+                    "member_count": str(row.get("member_count") or ""),
+                }
+            )
+        groups.sort(key=lambda item: item["name"])
+        return groups
+
     def _call(
         self,
         source: SourceContext,

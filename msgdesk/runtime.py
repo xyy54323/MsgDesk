@@ -15,6 +15,7 @@ from .services.notifications import NotificationService
 from .services.processing import ProcessingService
 from .services.scheduler import Scheduler
 from .services.session_keeper import SessionKeeper
+from .services.conversation_digest import ConversationDigestService
 from .services.sync import SyncService
 from .services.worker import Worker
 
@@ -32,12 +33,14 @@ class Runtime:
         self.processing_service = ProcessingService(config, self.repo, self.model)
         self.digest_service = DigestService(config, self.repo)
         self.notification_service = NotificationService(config, self.repo)
+        self.conversation_digest_service = ConversationDigestService(config, self.repo)
         self.worker = Worker(
             self.repo,
             self.sync_service,
             self.processing_service,
             self.digest_service,
             self.notification_service,
+            self.conversation_digest_service,
         )
         self.scheduler = Scheduler(config, self.repo)
         self.session_keeper = SessionKeeper(config, self.repo)

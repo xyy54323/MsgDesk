@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 data/
 digests/
+vendor/napcat/
 backups/
 .pytest_cache/
 config.json

@@ -386,3 +386,43 @@ def probe_vision(config: ModelConfig) -> bool:
     _VISION_CACHE[key] = supported
     return supported
 
+
+def chat_text(config: ModelConfig, system: str, user: str) -> str:
+    """Plain chat completion for summarisation (no JSON schema)."""
+    api_key = config.api_key or os.environ.get(config.api_key_env, "")
+    if not api_key:
+        raise AppError("AUTH_REQUIRED", "模型密钥未配置，无法生成群聊摘要")
+    if not config.base_url or not config.model:
+        raise AppError("CONFIG_INVALID", "模型 base_url 或 model 未配置")
+    payload = {
+        "model": config.model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.2,
+    }
+    request = urllib.request.Request(
+        config.base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=config.timeout_seconds) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        code = "AUTH_EXPIRED" if exc.code in (401, 403) else "REMOTE_TEMPORARY_ERROR"
+        raise AppError(code, f"模型调用失败 HTTP {exc.code}") from exc
+    except TimeoutError as exc:
+        raise AppError("NETWORK_TIMEOUT", "群聊摘要生成超时") from exc
+    except urllib.error.URLError as exc:
+        raise AppError("NETWORK_UNAVAILABLE", "模型接口不可达") from exc
+    choices = body.get("choices") or []
+    if not choices:
+        raise AppError("SCHEMA_INVALID", "模型未返回内容")
+    return str((choices[0].get("message") or {}).get("content") or "").strip()
+

@@ -372,6 +372,20 @@
   }
   .model-list-editor .btn { box-sizing: border-box; height: 44px; min-height: 44px; }
   .model-tags { display: flex; flex-wrap: wrap; gap: 7px; min-height: 31px; margin: 9px 0 12px; }
+  .qq-group-list {
+    max-height: 260px; overflow: auto;
+    border: 2px solid var(--line); background: #FBF5E6;
+  }
+  .qq-group-item {
+    display: grid; grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 8px; align-items: center;
+    padding: 7px 10px; border-bottom: 1px solid #E3DAC4;
+    font-size: 12px; cursor: pointer;
+  }
+  .qq-group-item:last-child { border-bottom: 0; }
+  .qq-group-item.on { background: #E7EAD1; }
+  .qq-group-name { overflow-wrap: anywhere; }
+  .qq-group-id { color: var(--muted); font: 11px/1.4 "Cascadia Mono", Consolas, monospace; }
   .model-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; background: var(--panel-2); border: 1px solid var(--line); font: 12px/1.3 "Cascadia Mono", Consolas, monospace; }
   .model-tag.active { background: var(--olive); color: #151911; font-weight: 700; }
   .model-tag button { padding: 0 2px; border: 0; background: transparent; cursor: pointer; font-weight: 700; }
@@ -1050,6 +1064,8 @@ const state = {
   modelEditingId: null,
   modelNames: [],
   promptFiles: [],
+  qqGroups: [],
+  qqSelected: new Set(),
   visionSupported: false,
   workbenchSourceId: null,
   sourceEditingId: null,
@@ -2526,16 +2542,23 @@ function renderSourceConfigFields(type, config) {
       </div>`;
     }
   } else if (type === 'qq_onebot') {
-    html += inputField('OneBot 地址', 'cfgBaseUrl', values.base_url || 'http://127.0.0.1:3000', 'http://127.0.0.1:3000');
-    html += inputField('Access Token', 'cfgAccessToken', '',
-      values.access_token ? '已配置，留空保持不变' : '可选');
-    html += `<label class="field"><span class="field-title">选取群号</span>
-      <input id="cfgConversations" value="${esc((values.selected_conversations || []).join(','))}" placeholder="123456, 654321">
-    </label>`;
-    html += inputField('每次拉取条数', 'cfgCount', values.count_per_poll || 100, '', 'number');
-    html += `<label class="check" style="align-self:end; margin-bottom:12px">
-      <input type="checkbox" id="cfgIncludePrivate" ${values.include_private ? 'checked' : ''}> 同时读取私聊
-    </label>`;
+    if (state.sourceEditingId === null) {
+      const intervalEl = document.getElementById('srcInterval');
+      if (intervalEl && Number(intervalEl.value || 0) <= 60) intervalEl.value = 1440;
+    }
+    html += `<div class="field">
+      <span class="field-title">要采集的群</span>
+      <span class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn tiny" onclick="loadQqGroups()">刷新群列表</button>
+        <span class="muted tiny" id="qqGroupHint">正在读取…</span>
+      </span>
+      <div id="qqGroupList" class="qq-group-list"></div>
+      <input type="hidden" id="cfgConversations" value="${esc((values.selected_conversations || []).join(','))}">
+      <span class="muted tiny">勾选你关心的群。群聊按天汇总：每个群每天只调用一次模型。</span>
+    </div>
+    <p class="muted tiny" style="grid-column:1/-1;margin:2px 0 0">
+      工作台会自动连接本机的 QQ 服务（NapCat，端口 3000），不需要你填写地址或口令。
+    </p>`;
   } else if (type === 'chat_import') {
     html += inputField('导入目录', 'cfgDirectory', values.directory || '', './imports/wechat');
     html += selectField('记录平台', 'cfgPlatform', values.platform || 'wechat', [
@@ -2548,6 +2571,15 @@ function renderSourceConfigFields(type, config) {
   }
   html += '</div>';
   element.innerHTML = html;
+  if (type === 'qq_onebot') {
+    state.qqGroups = [];
+    state.qqSelected = new Set(
+      (Array.isArray(values.selected_conversations) ? values.selected_conversations : [])
+        .map(String)
+    );
+    renderQqGroups();
+    loadQqGroups();
+  }
   if (type === 'ai_web') {
     state.promptFiles = Array.isArray(values.prompt_files) ? values.prompt_files.slice() : [];
     renderPromptFiles();
@@ -2567,6 +2599,69 @@ async function refreshVisionSupport() {
       ? 'md 会拼进提示词；图片作为参考图一起发给模型。'
       : `当前模型${result.data.model ? '（' + result.data.model + '）' : ''}不支持图片输入，只能上传 md / txt。`;
   }
+}
+
+function renderQqGroups() {
+  const box = document.getElementById('qqGroupList');
+  const hint = document.getElementById('qqGroupHint');
+  if (!box) return;
+  const groups = state.qqGroups || [];
+  if (!groups.length) {
+    const ids = Array.from(state.qqSelected || []);
+    box.innerHTML = ids.length
+      ? ids.map(id => `<label class="qq-group-item on">
+          <input type="checkbox" checked onchange="toggleQqGroup('${esc(id)}')">
+          <span class="qq-group-name">群 ${esc(id)}</span>
+          <span class="qq-group-id">${esc(id)}</span>
+        </label>`).join('')
+      : '<span class="muted tiny">还没有群，点「读取群列表」从你的 QQ 拉取。</span>';
+  } else {
+    box.innerHTML = groups.map(group => {
+      const on = state.qqSelected.has(String(group.id));
+      return `<label class="qq-group-item ${on ? 'on' : ''}">
+        <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleQqGroup('${esc(group.id)}')">
+        <span class="qq-group-name">${esc(group.name)}</span>
+        <span class="qq-group-id">${esc(group.id)}</span>
+      </label>`;
+    }).join('');
+  }
+  const input = document.getElementById('cfgConversations');
+  if (input) input.value = Array.from(state.qqSelected || []).join(',');
+  if (hint) {
+    hint.textContent = state.qqSelected.size
+      ? `已选 ${state.qqSelected.size} 个群`
+      : '还没选群';
+  }
+}
+
+function toggleQqGroup(id) {
+  const key = String(id);
+  if (state.qqSelected.has(key)) state.qqSelected.delete(key);
+  else state.qqSelected.add(key);
+  renderQqGroups();
+}
+
+async function loadQqGroups() {
+  const hint = document.getElementById('qqGroupHint');
+  if (!state.sourceEditingId) {
+    if (hint) hint.textContent = '先保存来源，再读取群列表';
+    return;
+  }
+  if (hint) hint.textContent = '读取中…';
+  const body = {
+    base_url: (document.getElementById('cfgBaseUrl')?.value || '').trim(),
+    access_token: (document.getElementById('cfgAccessToken')?.value || '').trim()
+  };
+  const result = await apiResult(
+    '/api/sources/' + encodeURIComponent(state.sourceEditingId) + '/groups',
+    { method: 'POST', body: JSON.stringify(body) }
+  );
+  if (!result.ok) {
+    if (hint) hint.textContent = '读取失败：' + (result.data.message || '未知错误');
+    return;
+  }
+  state.qqGroups = result.data.groups || [];
+  renderQqGroups();
 }
 
 function renderPromptFiles() {
@@ -2706,13 +2801,13 @@ async function saveSourceForm(event) {
       if (cookie && cookie !== '***') config.cookie = cookie;
     }
   } else if (type === 'qq_onebot') {
-    config.base_url = value('cfgBaseUrl') || 'http://127.0.0.1:3000';
+    config.base_url = value('cfgBaseUrl') || config.base_url || 'http://127.0.0.1:3000';
     const token = value('cfgAccessToken');
     if (token && token !== '***') config.access_token = token;
     config.selected_conversations = value('cfgConversations')
       .split(/[,，\s]+/).map(item => item.trim()).filter(Boolean);
-    config.include_private = checked('cfgIncludePrivate');
-    config.count_per_poll = Number(value('cfgCount') || 100);
+    delete config.include_private;
+    delete config.count_per_poll;
   } else if (type === 'chat_import') {
     config.directory = value('cfgDirectory');
     if (!config.directory) { notify('来源配置无效', '请填写导入目录。', 'error'); return; }

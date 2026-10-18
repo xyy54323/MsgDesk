@@ -445,6 +445,54 @@ class Repository:
             ).fetchall()
             return [_decode_row(dict(r)) for r in rows]
 
+    def messages_for_conversation_day(
+        self, source_id: str, conversation_id: str, date_text: str, zone_name: str
+    ) -> list[dict[str, Any]]:
+        from .timeutil import local_day_bounds
+
+        start, end = local_day_bounds(date_text, zone_name)
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                "SELECT m.*, c.name AS conversation_name FROM messages m "
+                "LEFT JOIN conversations c ON c.id = m.conversation_id "
+                "WHERE m.deleted_at IS NULL AND m.ignored_at IS NULL "
+                "AND m.source_id = ? AND m.conversation_id = ? "
+                "AND m.collected_at >= ? AND m.collected_at < ? "
+                "ORDER BY m.published_at",
+                (source_id, conversation_id, start, end),
+            ).fetchall()
+            return [_decode_row(dict(r)) for r in rows]
+
+    def upsert_conversation_digest(
+        self, *, source_id: str, conversation_id: str, conversation_name: str,
+        date_text: str, message_count: int, summary_md: str, model_name: str,
+    ) -> None:
+        now = iso_utc()
+        with self.db.connection() as conn:
+            conn.execute(
+                "INSERT INTO conversation_digests(id, source_id, conversation_id, "
+                "conversation_name, date_text, message_count, summary_md, model_name, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source_id, conversation_id, date_text) DO UPDATE SET "
+                "conversation_name = excluded.conversation_name, "
+                "message_count = excluded.message_count, "
+                "summary_md = excluded.summary_md, "
+                "model_name = excluded.model_name, "
+                "updated_at = excluded.updated_at",
+                (new_id(), source_id, conversation_id, conversation_name, date_text,
+                 message_count, summary_md, model_name, now, now),
+            )
+
+    def conversation_digests_for_day(self, date_text: str) -> list[dict[str, Any]]:
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                "SELECT d.*, s.name AS source_name FROM conversation_digests d "
+                "LEFT JOIN sources s ON s.id = d.source_id "
+                "WHERE d.date_text = ? ORDER BY d.source_id, d.conversation_name",
+                (date_text,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def update_message_status(self, message_id: str, status: str) -> None:
         with self.db.connection() as conn:
             conn.execute(

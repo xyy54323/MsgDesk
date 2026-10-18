@@ -334,6 +334,30 @@ class ApiHandler(BaseHTTPRequestHandler):
                 repo.audit("source.delete", "source", source_id, {"purge": purge})
                 return 200, {"deleted": source_id, "purged": purge}
 
+        groups_match = re.fullmatch(r"/api/sources/([^/]+)/groups", path)
+        if groups_match and method == "POST":
+            source_id = groups_match.group(1)
+            row = repo.get_source(source_id)
+            if row is None:
+                raise AppError("NOT_FOUND", "来源不存在")
+            source_config = loads(row.get("config_json"), {}) or {}
+            for key in ("base_url", "access_token"):
+                if body.get(key):
+                    source_config[key] = str(body[key]).strip()
+            context = SourceContext(
+                id=row["id"],
+                type=row["type"],
+                name=row["name"],
+                config=source_config,
+                backfill_since=row.get("backfill_since"),
+            )
+            adapter = create_adapter(row["adapter_type"])
+            try:
+                groups = adapter.list_groups(context)  # type: ignore[attr-defined]
+            finally:
+                adapter.close()
+            return 200, {"groups": groups}
+
         login_match = re.fullmatch(r"/api/sources/([^/]+)/login", path)
         if login_match and method == "POST":
             from ..services import browser_login
@@ -1226,6 +1250,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             "rss" if source_type == "frontier" else source_type
         )
         config = body.get("config") or {}
+        if adapter_type == "qq_onebot" and isinstance(config, dict):
+            # Local NapCat is the default target; users should not type this.
+            config.setdefault("base_url", "http://127.0.0.1:3000")
         self._validate_adapter_config(adapter_type, config)
         return {
             "type": source_type,

@@ -32,8 +32,25 @@ config.json       本机配置（含密钥，不要外传）
 - **网站 / 资讯**：由智能体采集。同步时模型拿到 `fetch_page` 工具，自己决定
   抓哪些页面，只保留发布日期是今天的条目，图片下载到 `data/media/日期/`，
   正文以 Markdown 入库。
-- **QQ**：通过 OneBot 只读接入，需要本地运行 NapCat。
+- **QQ**：通过本机 NapCat 只读接入，NapCat 放在项目的 `vendor/napcat/` 里，
+  用 `scripts/napcat.py` 管理，不需要单独安装（见下）。
 - **微信 / 企业微信**：暂无可用采集通道，可先建来源占位。
+
+### QQ（可选，只读）
+
+NapCat 是把“你登录的 QQ 收到的群消息”转成本地接口的桥，不是机器人账号。
+它跟着项目走，不装在系统目录：
+
+```powershell
+F:\env\python\python.exe scripts\napcat.py install     # 首次：下载到 vendor/napcat（约 345MB）
+F:\env\python\python.exe scripts\napcat.py start       # 启动，需要时弹出二维码
+F:\env\python\python.exe scripts\napcat.py configure   # 登录后执行：开启 127.0.0.1:3000 接口
+F:\env\python\python.exe scripts\napcat.py status      # 查看是否在跑、能读到多少个群
+```
+
+登录一次之后可以用 `start -q <QQ号>` 免扫码重启。工作台里的 QQ 来源只需要勾选群，
+地址和口令由程序自动填。`vendor/napcat/` 不进仓库（单文件超过 GitHub 限制），
+所以换机器时跑一次 `install` 即可，不需要你去找安装包。
 
 采集提示词写给模型看，例如：
 
