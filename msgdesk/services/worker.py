@@ -74,6 +74,9 @@ class Worker:
             if not source_id:
                 raise AppError("VALIDATION_ERROR", "sync_source 任务缺少 source_id")
             self.sync_service.sync_source(source_id, max_items=int(payload.get("max_items", 50)))
+            # Any day that received messages but never got a digest is filled in
+            # here, so old days are not left blank.
+            self.digest_service.generate_missing()
         elif job_type == "process_message":
             message_id = job.get("message_id") or payload.get("message_id")
             if not message_id:

@@ -12,7 +12,7 @@ from typing import Any
 
 from ..config import AppConfig
 from ..repository import Repository
-from ..timeutil import local_zone, parse_datetime, utc_now
+from ..timeutil import local_date_of, local_zone, parse_datetime, utc_now
 
 PRIORITY_RANK = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
 PRIORITY_LABEL = {"urgent": "紧急", "high": "高", "normal": "普通", "low": "低"}
@@ -55,6 +55,21 @@ class DigestService:
             "changed": previous != digest,
             "content_hash": digest,
         }
+
+    def generate_missing(self, limit_days: int = 60) -> int:
+        """Create digests for every day that has messages but no digest yet."""
+        zone = self.config.system.timezone
+        existing = {
+            str(item.get("date")) for item in self.repo.list_digests(400)
+        }
+        days: list[str] = []
+        for timestamp in self.repo.recent_message_timestamps():
+            day = local_date_of(timestamp, zone)
+            if day and day not in existing and day not in days:
+                days.append(day)
+        for day in days[:limit_days]:
+            self.generate(day)
+        return min(len(days), limit_days)
 
     def _render(self, date_text: str, messages: list[dict[str, Any]]) -> str:
         zone = self.config.system.timezone

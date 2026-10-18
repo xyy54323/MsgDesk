@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import timedelta
 from typing import Any, Iterable
@@ -36,8 +37,26 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
 class Repository:
     def __init__(self, db: Database):
         self.db = db
-        self.current_job_id: str | None = None
-        self.current_source_id: str | None = None
+        # Trace attribution must be per worker thread: the same repository is
+        # shared by every worker and a plain attribute would let one job's
+        # traces land under another job's source.
+        self._trace_local = threading.local()
+
+    @property
+    def current_job_id(self) -> str | None:
+        return getattr(self._trace_local, "job_id", None)
+
+    @current_job_id.setter
+    def current_job_id(self, value: str | None) -> None:
+        self._trace_local.job_id = value
+
+    @property
+    def current_source_id(self) -> str | None:
+        return getattr(self._trace_local, "source_id", None)
+
+    @current_source_id.setter
+    def current_source_id(self, value: str | None) -> None:
+        self._trace_local.source_id = value
 
     # Sources -------------------------------------------------------------
     def list_sources(self, include_deleted: bool = False) -> list[dict[str, Any]]:
@@ -445,6 +464,17 @@ class Repository:
                 (start, end),
             ).fetchall()
             return [_decode_row(dict(r)) for r in rows]
+
+    def recent_message_timestamps(self, limit: int = 5000) -> list[str]:
+        """Timestamps of visible messages, newest first."""
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                "SELECT COALESCE(published_at, collected_at) AS ts FROM messages "
+                "WHERE deleted_at IS NULL AND ignored_at IS NULL "
+                "ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [str(row["ts"]) for row in rows if row["ts"]]
 
     def messages_for_conversation_day(
         self, source_id: str, conversation_id: str, date_text: str, zone_name: str

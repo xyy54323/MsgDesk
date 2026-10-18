@@ -111,6 +111,25 @@ class QqDigestFlowTests(unittest.TestCase):
             self.assertNotIn("原始消息索引", content)
             self.assertNotIn("通知一", content)
 
+    def test_missing_digests_are_generated(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            repo = build_repo(root)
+            source = qq_source(repo)
+            messages = [
+                raw("g1", "群一", "1", "通知一"),
+                raw("g1", "群一", "2", "通知二"),
+            ]
+            SyncService(config, repo, adapter_factory=lambda _: FakeQQAdapter(messages)).sync_source(
+                source["id"]
+            )
+            service = DigestService(config, repo)
+            self.assertEqual(repo.list_digests(10), [])
+            self.assertEqual(service.generate_missing(), 1)
+            digests = repo.list_digests(10)
+            self.assertEqual([item["date"] for item in digests], ["2026-10-18"])
+
 
 if __name__ == "__main__":
     unittest.main()

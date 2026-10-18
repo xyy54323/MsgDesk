@@ -74,7 +74,22 @@ class Runtime:
         )
         keeper_thread.start()
         self._threads.append(keeper_thread)
+        backfill = threading.Thread(
+            target=self._generate_missing_digests,
+            name="msgdesk-digest-backfill",
+            daemon=True,
+        )
+        backfill.start()
+        self._threads.append(backfill)
         log.info("runtime started with %s workers", count)
+
+    def _generate_missing_digests(self) -> None:
+        try:
+            count = self.digest_service.generate_missing()
+            if count:
+                log.info("generated %s missing digests", count)
+        except Exception:  # noqa: BLE001 - never block startup
+            log.exception("digest backfill failed")
 
     def stop(self) -> None:
         self.stop_event.set()
