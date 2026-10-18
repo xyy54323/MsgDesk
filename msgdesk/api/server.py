@@ -342,6 +342,13 @@ class ApiHandler(BaseHTTPRequestHandler):
         if path == "/api/qq/relogin" and method == "POST":
             from ..services import qq_bridge
 
+            for source in repo.list_sources():
+                if source.get("adapter_type") != "qq_onebot":
+                    continue
+                source_config = loads(source.get("config_json"), {}) or {}
+                if source_config.get("selected_conversations"):
+                    source_config["selected_conversations"] = []
+                    repo.update_source(source["id"], {"config": source_config})
             qq_bridge.relogin()
             return 200, {"status": "restarting"}
 
