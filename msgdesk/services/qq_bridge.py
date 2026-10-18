@@ -13,19 +13,25 @@ import hashlib
 import json
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+from ..paths import app_root
+
+ROOT = app_root()
 VENDOR = ROOT / "vendor" / "napcat"
 CONFIG_DIR = VENDOR / "napcat" / "config"
 WEBUI_CONFIG = CONFIG_DIR / "webui.json"
 QR_PATH = VENDOR / "napcat" / "cache" / "qrcode.png"
 LOG_DIR = ROOT / "data" / "logs"
 TOKEN = "msgdesk-qq-local"
+RELEASE_API = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+ASSET_NAME = "NapCat.Shell.Windows.Node.zip"
 
 # A QQ login QR is valid for two minutes.  Rotate it while there is still a
 # comfortable window left, so scanning never races the expiry.
@@ -56,6 +62,31 @@ def installed() -> bool:
     return (VENDOR / "napcat.bat").exists()
 
 
+def install(force: bool = False) -> str:
+    """Download the bundled QQ bridge into ``vendor/napcat`` once."""
+    if sys.platform != "win32":
+        raise RuntimeError("安装包目前只带 Windows 版 QQ 桥，其他平台要换对应的 NapCat 构建")
+    if installed() and not force:
+        return str(VENDOR)
+    request = urllib.request.Request(RELEASE_API, headers={"User-Agent": "msgdesk"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        release = json.loads(response.read().decode("utf-8"))
+    url = ""
+    for asset in release.get("assets") or []:
+        if asset.get("name") == ASSET_NAME:
+            url = str(asset.get("browser_download_url") or "")
+            break
+    if not url:
+        raise RuntimeError(f"没有找到 {ASSET_NAME} 下载地址")
+    VENDOR.mkdir(parents=True, exist_ok=True)
+    archive = VENDOR / ASSET_NAME
+    urllib.request.urlretrieve(url, archive)
+    with zipfile.ZipFile(archive) as handle:
+        handle.extractall(VENDOR)
+    archive.unlink(missing_ok=True)
+    return str(VENDOR)
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -69,7 +100,7 @@ def _pids(refresh: bool = False) -> list[int]:
         return list(_pid_cache["pids"])
     script = (
         "Get-CimInstance Win32_Process | Where-Object { "
-        "$_.CommandLine -like '*vendor\\napcat*' -and $_.Name -ne 'pwsh.exe' } "
+        "$_.Name -eq 'node.exe' -and $_.CommandLine -like '*vendor\\napcat*' } "
         "| Select-Object -ExpandProperty ProcessId"
     )
     try:
@@ -264,6 +295,7 @@ def _snapshot(
     scanned = phase_name in {"qrcode_scanned", "initializing", "logging_in"}
     left = max(0, QR_TTL - age) if age >= 0 else 0
     return {
+        "installed": installed(),
         "running": running_state,
         "logged_in": logged_in,
         "uin": (info or {}).get("uin", ""),

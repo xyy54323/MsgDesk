@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from .errors import AppError
+from .paths import app_root
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = app_root()
 
 
 @dataclass

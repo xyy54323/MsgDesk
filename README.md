@@ -5,12 +5,40 @@
 
 ## 运行
 
-```powershell
-F:\env\python\python.exe -m msgdesk --config .\config.json serve
+打包版（推荐，不需要装 Python）：
+
+```text
+解压 MsgDesk-win64.zip
+双击 Start-MsgDesk.cmd
 ```
 
-启动后终端会打印带令牌的地址，形如 `http://127.0.0.1:8080/?token=...`。
-也可以直接用 `msgdesk.cmd` / `msgdesk.ps1`。
+第一次启动会自动生成 `config.json` 和数据库，并打开
+`http://127.0.0.1:8080/?token=...`。数据、日报、日志都在这个文件夹里，
+整个文件夹拷走就能迁移。
+
+从源码运行：
+
+```powershell
+python -m msgdesk --config .\config.json serve
+```
+
+`msgdesk.cmd` / `msgdesk.ps1` 会自动找 Python（包内 `runtime\python` → `.venv`
+→ 系统 `py -3` / `python`），不写死路径。
+
+### 打安装包
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_package.ps1
+```
+
+产物是 `dist\MsgDesk-win64.zip`（约 11MB，不含 QQ 桥）。常用开关：
+
+- `-WithNapCat`：把 `vendor\napcat` 一起打进去（包会变成 350MB 左右，适合离线交付）
+- `-WithBrowser`：把 Playwright 和 Chromium 打进包（网站登录用，约 +150MB）
+- `-NoZip`：只产出 `dist\MsgDesk` 目录
+
+PyInstaller 是按系统各自打包的：在 Windows 上打 exe，在 macOS / Linux 上跑
+同一个脚本就得到对应平台的目录。QQ 桥目前只带 Windows 构建。
 
 ## 目录
 
@@ -42,13 +70,14 @@ NapCat 是把“你登录的 QQ 收到的群消息”转成本地接口的桥，
 它跟着项目走，不装在系统目录：
 
 ```powershell
-F:\env\python\python.exe scripts\napcat.py install     # 首次：下载到 vendor/napcat（约 345MB）
-F:\env\python\python.exe scripts\napcat.py start       # 启动，需要时弹出二维码
-F:\env\python\python.exe scripts\napcat.py configure   # 登录后执行：开启 127.0.0.1:3000 接口
-F:\env\python\python.exe scripts\napcat.py status      # 查看是否在跑、能读到多少个群
+MsgDesk.exe napcat install    # 首次：下载到 vendor/napcat（约 340MB）
+MsgDesk.exe napcat start      # 启动，需要时生成二维码
+MsgDesk.exe napcat status     # 查看运行状态和二维码剩余时间
 ```
 
-登录一次之后可以用 `start -q <QQ号>` 免扫码重启。工作台里的 QQ 来源只需要勾选群，
+打包版也可以直接在来源编辑页点「下载并安装」，不用敲命令。
+
+登录一次之后可以用 `napcat start -q <QQ号>` 免扫码重启。工作台里的 QQ 来源只需要勾选群，
 地址和口令由程序自动填。`vendor/napcat/` 不进仓库（单文件超过 GitHub 限制），
 所以换机器时跑一次 `install` 即可，不需要你去找安装包。
 

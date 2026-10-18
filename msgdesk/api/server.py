@@ -38,9 +38,10 @@ from ..runtime import Runtime
 from ..services.model import ModelInput as ModelInputType, create_model_provider
 from ..services.notifications import PRIORITY_RANK, build_channel
 from ..timeutil import iso_utc, local_date_of, local_zone, parse_datetime, utc_now
+from ..paths import package_root
 
 log = logging.getLogger("msgdesk.api")
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR = package_root() / "api" / "static"
 MAX_BODY = 2 * 1024 * 1024
 
 
@@ -343,6 +344,15 @@ class ApiHandler(BaseHTTPRequestHandler):
             from ..services import qq_bridge
 
             return 200, qq_bridge.state()
+
+        if path == "/api/qq/install" and method == "POST":
+            from ..services import qq_bridge
+
+            try:
+                where = qq_bridge.install()
+            except (RuntimeError, OSError, urllib.error.URLError) as exc:
+                raise AppError("REMOTE_TEMPORARY_ERROR", f"下载 QQ 桥失败：{exc}") from exc
+            return 200, {"installed": True, "path": where}
 
         if path == "/api/qq/relogin" and method == "POST":
             from ..services import qq_bridge

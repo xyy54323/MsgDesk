@@ -7,7 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+from .paths import package_root
+
+MIGRATIONS_DIR = package_root() / "migrations"
 
 
 class Database:

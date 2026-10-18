@@ -114,6 +114,7 @@ def _parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="启动 API、调度器和任务 worker")
     serve.add_argument("--no-scheduler", action="store_true", help="只启动 API 和 worker")
+    serve.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
 
     sync = sub.add_parser("sync", help="立即同步来源")
     sync.add_argument("--source", help="来源 ID；省略时同步全部启用来源")
@@ -132,22 +133,34 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("backup", help="备份数据库、配置和日报")
     sub.add_parser("start", help="后台启动服务")
     sub.add_parser("stop", help="停止后台服务")
+
+    napcat = sub.add_parser("napcat", help="管理 QQ 桥（NapCat）")
+    napcat.add_argument(
+        "action",
+        choices=["install", "configure", "start", "stop", "status", "relogin"],
+    )
+    napcat.add_argument("-q", "--uin", help="QQ 号，用于免扫码快速登录")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     _configure_stdio()
+    from .paths import configure_runtime_env
+
+    configure_runtime_env()
     args = _parser().parse_args(argv)
     try:
         if args.command == "init":
             return cmd_init(args.config)
+        if args.command == "napcat":
+            return cmd_napcat(args.action, args.uin)
         config = load_config(args.config)
         setup_logging(config)
         if args.command == "config-check":
             return cmd_config_check(config)
         runtime = Runtime(config)
         if args.command == "serve":
-            return cmd_serve(runtime, no_scheduler=args.no_scheduler)
+            return cmd_serve(runtime, no_scheduler=args.no_scheduler, open_browser=args.open)
         if args.command == "sync":
             return cmd_sync(runtime, args.source, args.max_items)
         if args.command == "digest":
@@ -231,7 +244,7 @@ def cmd_config_check(config: AppConfig) -> int:
     return 0
 
 
-def cmd_serve(runtime: Runtime, *, no_scheduler: bool = False) -> int:
+def cmd_serve(runtime: Runtime, *, no_scheduler: bool = False, open_browser: bool = False) -> int:
     from .api.server import create_server
 
     config = runtime.config
@@ -254,6 +267,12 @@ def cmd_serve(runtime: Runtime, *, no_scheduler: bool = False) -> int:
         print(f"访问令牌见: {config.data_dir / 'api_token.txt'}", flush=True)
     print(f"数据库: {config.db_path}", flush=True)
     print("按 Ctrl+C 停止。", flush=True)
+    if open_browser:
+        import threading
+        import webbrowser
+
+        target = f"http://{host}:{port}/?token={token}" if token else f"http://{host}:{port}/"
+        threading.Timer(1.2, lambda: webbrowser.open(target)).start()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
@@ -261,6 +280,33 @@ def cmd_serve(runtime: Runtime, *, no_scheduler: bool = False) -> int:
     finally:
         runtime.stop()
         server.server_close()
+    return 0
+
+
+def cmd_napcat(action: str, uin: str | None) -> int:
+    from .services import qq_bridge
+
+    try:
+        if action == "install":
+            path = qq_bridge.install()
+            print(f"QQ 桥已安装: {path}")
+        elif action == "configure":
+            changed = qq_bridge.configure_onebot()
+            print("已开启 127.0.0.1:3000 接口" if changed else "接口已配置")
+        elif action == "start":
+            qq_bridge.start(uin)
+            print("QQ 桥已启动")
+        elif action == "stop":
+            qq_bridge.stop()
+            print("QQ 桥已停止")
+        elif action == "relogin":
+            qq_bridge.relogin()
+            print("已重启，等待扫码")
+        else:
+            print(json.dumps(qq_bridge.state(), ensure_ascii=False, indent=2))
+    except (RuntimeError, OSError) as exc:
+        print(f"[错误] {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

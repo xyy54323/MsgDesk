@@ -8,4 +8,8 @@ backups/
 .pytest_cache/
 config.json
 *.log
+build/
+dist/
+runtime/
+.venv/
 

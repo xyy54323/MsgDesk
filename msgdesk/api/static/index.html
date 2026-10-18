@@ -2695,6 +2695,21 @@ async function ensureQqReady() {
   checkQqLogin();
 }
 
+async function installQqBridge() {
+  const status = document.getElementById('qqLoginStatus');
+  if (status) {
+    status.textContent = '正在下载 QQ 桥（约 340MB），下载完会自动启动，请稍候…';
+  }
+  const result = await apiResult('/api/qq/install', { method: 'POST', body: '{}' });
+  if (!result.ok) {
+    if (status) status.textContent = `安装失败：${result.data.message || ''}`;
+    return;
+  }
+  if (status) status.textContent = '安装完成，正在启动 QQ 服务…';
+  await apiResult('/api/qq/status');
+  checkQqLogin();
+}
+
 async function refreshQqQr() {
   const status = document.getElementById('qqLoginStatus');
   if (status) status.textContent = '正在刷新二维码…';
@@ -2721,7 +2736,8 @@ async function checkQqLogin() {
   }
   const data = result.data;
   if (!data.installed) {
-    status.textContent = '还没安装本机的 QQ 桥（vendor/napcat），运行 scripts/napcat.py install';
+    status.innerHTML = '还没安装 QQ 桥（NapCat），首次使用需要下载一次。'
+      + '<button type="button" class="btn tiny" style="margin-left:8px" onclick="installQqBridge()">下载并安装</button>';
     image.style.display = 'none';
     return;
   }

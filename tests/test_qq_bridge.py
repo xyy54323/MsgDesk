@@ -79,6 +79,14 @@ class QrSnapshotTests(unittest.TestCase):
             qq_bridge.state()
         auto.assert_not_called()
 
+    def test_snapshot_reports_install_state(self):
+        with mock.patch.object(qq_bridge, "installed", return_value=True):
+            snap = qq_bridge._snapshot(None, {}, True, False)
+        self.assertTrue(snap["installed"])
+        with mock.patch.object(qq_bridge, "installed", return_value=False):
+            snap = qq_bridge._snapshot(None, {}, False, False)
+        self.assertFalse(snap["installed"])
+
 
 if __name__ == "__main__":
     unittest.main()
