@@ -123,6 +123,15 @@ class QQOneBotAdapter(BaseAdapter):
         )
         count = max(1, min(count, 1000))
         cursor_time = parse_datetime(cursor.last_message_time)
+        # First sync should not backfill old history: only today's messages.
+        zone_name = str(source.config.get("timezone") or "Asia/Shanghai")
+        from ..timeutil import local_zone
+        from datetime import datetime
+
+        today_start = (
+            datetime.now(local_zone(zone_name))
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+        )
         messages: list[RawMessage] = []
         warnings: list[str] = []
         failures = 0
@@ -139,10 +148,12 @@ class QQOneBotAdapter(BaseAdapter):
                 continue
             items.sort(key=lambda item: int(item.get("time") or 0))
             for item in items:
+                timestamp = self._timestamp(item.get("time"))
                 if cursor_time is not None:
-                    timestamp = self._timestamp(item.get("time"))
                     if timestamp is None or timestamp <= cursor_time:
                         continue
+                elif timestamp is not None and timestamp < today_start:
+                    continue
                 converted = self._convert(item, conversation_id)
                 if converted is not None:
                     messages.append(converted)
