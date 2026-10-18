@@ -1083,6 +1083,7 @@ const state = {
   promptFiles: [],
   qqGroups: [],
   qqSelected: new Set(),
+  qqLoggedIn: false,
   visionSupported: false,
   workbenchSourceId: null,
   sourceEditingId: null,
@@ -2348,12 +2349,21 @@ async function loadSources() {
   }
   state.sources = sourcesResult.data.sources || [];
   state.accounts = accountsResult.ok ? (accountsResult.data.accounts || []) : [];
+  if (state.sources.some(item => item.adapter_type === 'qq_onebot')) {
+    const qq = await apiResult('/api/qq/state');
+    state.qqLoggedIn = Boolean(qq.ok && qq.data.logged_in);
+  }
   renderTopActions();
   renderSources();
 }
 
 function sourceStatus(source) {
   if (source.active_job) return '<span class="badge normal">同步中</span>';
+  if (source.adapter_type === 'qq_onebot') {
+    const groups = (source.config && source.config.selected_conversations) || [];
+    if (!groups.length) return '<span class="badge low">未选择群</span>';
+    if (!state.qqLoggedIn) return '<span class="badge bad">QQ 未登录</span>';
+  }
   if (source.config && source.config.cookie_invalid) {
     return '<span class="badge bad">登录失效</span>';
   }
@@ -2667,12 +2677,14 @@ async function checkQqLogin() {
     return;
   }
   if (data.logged_in) {
+    state.qqLoggedIn = true;
     status.textContent = `已登录：${data.name || 'QQ'}（${data.uin}）`;
     image.style.display = 'none';
     loadQqGroups();
     return;
   }
   // Not logged in: the group list is meaningless until a scan finishes.
+  state.qqLoggedIn = false;
   state.qqGroups = [];
   const box = document.getElementById('qqGroupList');
   if (box) {

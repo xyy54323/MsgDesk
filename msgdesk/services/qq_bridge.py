@@ -118,6 +118,12 @@ def relogin() -> None:
     start(None)
 
 
+def state() -> dict[str, Any]:
+    """Cheap read-only probe used by the sources page."""
+    info = login_info()
+    return {"running": running(), "logged_in": bool(info), "uin": (info or {}).get("uin", "")}
+
+
 def ensure_ready() -> dict[str, Any]:
     """Start NapCat, wire the endpoint, and report what the UI should show."""
     if not installed():
