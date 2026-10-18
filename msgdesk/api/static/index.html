@@ -835,6 +835,7 @@
             </div>
             <span class="muted small">所有平台适配器只读；系统不提供发送、回复或社交操作</span>
           </div>
+          <div class="chips" id="sourceFilters"></div>
           <div id="sourceList" class="model-list"></div>
         </div>
 
@@ -1084,6 +1085,7 @@ const state = {
   qqGroups: [],
   qqSelected: new Set(),
   qqLoggedIn: false,
+  sourceCategory: '',
   visionSupported: false,
   workbenchSourceId: null,
   sourceEditingId: null,
@@ -2357,12 +2359,15 @@ async function loadSources() {
   renderSources();
 }
 
+function setSourceCategory(name) {
+  state.sourceCategory = name || '';
+  renderSources();
+}
+
 function sourceStatus(source) {
   if (source.active_job) return '<span class="badge normal">同步中</span>';
   if (source.adapter_type === 'qq_onebot') {
-    const groups = (source.config && source.config.selected_conversations) || [];
-    if (!groups.length) return '<span class="badge low">未选择群</span>';
-    if (!state.qqLoggedIn) return '<span class="badge bad">QQ 未登录</span>';
+    if (!state.qqLoggedIn) return '<span class="badge bad">未登录</span>';
   }
   if (source.config && source.config.cookie_invalid) {
     return '<span class="badge bad">登录失效</span>';
@@ -2383,16 +2388,30 @@ function sourceDetail(source) {
 function renderSources() {
   const container = document.getElementById('sourceList');
   document.getElementById('pageMeta').textContent = `${state.sources.length} 个来源`;
-  if (!state.sources.length) {
+  const categories = Array.from(new Set(
+    state.sources.map(source => String(source.default_category || '').trim()).filter(Boolean)
+  ));
+  const filters = document.getElementById('sourceFilters');
+  if (filters) {
+    filters.innerHTML = [`<button class="chip ${state.sourceCategory ? '' : 'active'}" onclick="setSourceCategory('')">全部</button>`]
+      .concat(categories.map(name =>
+        `<button class="chip ${state.sourceCategory === name ? 'active' : ''}" onclick="setSourceCategory('${esc(name)}')">${esc(name)}</button>`
+      ))
+      .join('');
+  }
+  const visible = state.sourceCategory
+    ? state.sources.filter(source => String(source.default_category || '') === state.sourceCategory)
+    : state.sources;
+  if (!visible.length) {
     container.innerHTML = `
       <div class="empty-state model-empty">
         <div class="empty-glyph">□</div>
-        <h3>还没有信息来源</h3>
-        <p>点击右上角「添加来源」，配置 RSS、网站、QQ 只读连接或聊天记录目录。</p>
+        <h3>${state.sources.length ? '这个分类下没有来源' : '还没有信息来源'}</h3>
+        <p>${state.sources.length ? '换个分类，或点右上角添加来源。' : '点击右上角「添加来源」，配置网站、QQ 或资讯。'}</p>
       </div>`;
     return;
   }
-  container.innerHTML = state.sources.map(source => `
+  container.innerHTML = visible.map(source => `
     <article class="model-provider-card">
       <div>
         <h3>${esc(source.name)}</h3>
