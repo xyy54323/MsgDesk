@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from ..errors import AppError
+from ..repository import loads
 from ..timeutil import local_date_of
 from .model import chat_text
 
@@ -29,6 +30,9 @@ class ConversationDigestService:
         self.repo = repo
 
     def summarize(self, source_id: str, conversation_id: str, date_text: str) -> dict[str, Any]:
+        source_row = self.repo.get_source(source_id) or {}
+        source_config = loads(source_row.get("config_json"), {}) or {}
+        extra = str(source_config.get("prompt") or "").strip()
         messages = self.repo.messages_for_conversation_day(
             source_id, conversation_id, date_text, self.config.system.timezone
         )
@@ -51,8 +55,11 @@ class ConversationDigestService:
         if not transcript:
             return {"messages": len(messages), "summary": ""}
         user = f"群名：{name}\n日期：{date_text}\n消息数：{len(messages)}\n\n{transcript}"
+        system = SYSTEM_PROMPT
+        if extra:
+            system += "\n\n用户的整理要求（优先遵守）：\n" + extra
         try:
-            summary = chat_text(self.config.model, SYSTEM_PROMPT, user)
+            summary = chat_text(self.config.model, system, user)
         except AppError as exc:
             log.warning("conversation summary failed: %s", exc.message)
             raise

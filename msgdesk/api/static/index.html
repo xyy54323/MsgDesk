@@ -373,17 +373,22 @@
   .model-list-editor .btn { box-sizing: border-box; height: 44px; min-height: 44px; }
   .model-tags { display: flex; flex-wrap: wrap; gap: 7px; min-height: 31px; margin: 9px 0 12px; }
   .qq-group-list {
-    max-height: 260px; overflow: auto;
+    max-width: 620px;
+    max-height: 178px; overflow: auto;
     border: 2px solid var(--line); background: #FBF5E6;
   }
   .qq-group-item {
     display: grid; grid-template-columns: 20px minmax(0, 1fr) auto;
     gap: 8px; align-items: center;
-    padding: 7px 10px; border-bottom: 1px solid #E3DAC4;
-    font-size: 12px; cursor: pointer;
+    padding: 3px 9px; border-bottom: 1px solid #E3DAC4;
+    font-size: 12px; line-height: 20px; cursor: pointer;
   }
   .qq-group-item:last-child { border-bottom: 0; }
   .qq-group-item.on { background: #E7EAD1; }
+  .qq-group-item input[type="checkbox"] {
+    width: 15px; height: 15px; min-height: 0; margin: 0; padding: 0;
+    border: 0; accent-color: var(--olive);
+  }
   .qq-group-name { overflow-wrap: anywhere; }
   .qq-group-id { color: var(--muted); font: 11px/1.4 "Cascadia Mono", Consolas, monospace; }
   .model-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; background: var(--panel-2); border: 1px solid var(--line); font: 12px/1.3 "Cascadia Mono", Consolas, monospace; }
@@ -2552,9 +2557,16 @@ function renderSourceConfigFields(type, config) {
         <button type="button" class="btn tiny" onclick="loadQqGroups()">刷新群列表</button>
         <span class="muted tiny" id="qqGroupHint">正在读取…</span>
       </span>
+      <input id="qqGroupSearch" placeholder="搜索群名或群号" oninput="renderQqGroups()"
+             style="max-width:620px">
       <div id="qqGroupList" class="qq-group-list"></div>
       <input type="hidden" id="cfgConversations" value="${esc((values.selected_conversations || []).join(','))}">
       <span class="muted tiny">勾选你关心的群。群聊按天汇总：每个群每天只调用一次模型。</span>
+    </div>
+    <div class="field">
+      <span class="field-title">群聊摘要提示词</span>
+      <textarea id="cfgPrompt" spellcheck="false" placeholder="例如：只保留通知、考试、报名、奖学金相关信息；摘要写成要点，标出截止时间。">${esc(values.prompt || '')}</textarea>
+      <span class="muted tiny">写给模型看：每个群每天汇总时按这个要求整理。</span>
     </div>
     <p class="muted tiny" style="grid-column:1/-1;margin:2px 0 0">
       工作台会自动连接本机的 QQ 服务（NapCat，端口 3000），不需要你填写地址或口令。
@@ -2606,6 +2618,12 @@ function renderQqGroups() {
   const hint = document.getElementById('qqGroupHint');
   if (!box) return;
   const groups = state.qqGroups || [];
+  const query = (document.getElementById('qqGroupSearch')?.value || '').trim().toLowerCase();
+  const visible = query
+    ? groups.filter(group =>
+        String(group.name).toLowerCase().includes(query) || String(group.id).includes(query)
+      )
+    : groups;
   if (!groups.length) {
     const ids = Array.from(state.qqSelected || []);
     box.innerHTML = ids.length
@@ -2616,14 +2634,14 @@ function renderQqGroups() {
         </label>`).join('')
       : '<span class="muted tiny">还没有群，点「读取群列表」从你的 QQ 拉取。</span>';
   } else {
-    box.innerHTML = groups.map(group => {
+    box.innerHTML = visible.length ? visible.map(group => {
       const on = state.qqSelected.has(String(group.id));
       return `<label class="qq-group-item ${on ? 'on' : ''}">
         <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleQqGroup('${esc(group.id)}')">
         <span class="qq-group-name">${esc(group.name)}</span>
         <span class="qq-group-id">${esc(group.id)}</span>
       </label>`;
-    }).join('');
+    }).join('') : '<div class="muted tiny" style="padding:10px">没有匹配的群</div>';
   }
   const input = document.getElementById('cfgConversations');
   if (input) input.value = Array.from(state.qqSelected || []).join(',');
@@ -2806,6 +2824,7 @@ async function saveSourceForm(event) {
     if (token && token !== '***') config.access_token = token;
     config.selected_conversations = value('cfgConversations')
       .split(/[,，\s]+/).map(item => item.trim()).filter(Boolean);
+    config.prompt = value('cfgPrompt');
     delete config.include_private;
     delete config.count_per_poll;
   } else if (type === 'chat_import') {
