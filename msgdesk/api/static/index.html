@@ -1094,6 +1094,10 @@ const state = {
 };
 
 const params = new URLSearchParams(location.search);
+if (params.get('desktop') === '1') {
+  state.desktop = true;
+  params.delete('desktop');
+}
 if (params.get('token')) {
   state.token = params.get('token');
   localStorage.setItem('msgdesk_token', state.token);
@@ -1288,6 +1292,8 @@ function toast(message, error = false) {
 
 let askingToken = false;
 function askToken() {
+  // The desktop window always receives its token from the launcher.
+  if (state.desktop) return;
   if (askingToken) return;
   askingToken = true;
   openModal(`
@@ -1295,7 +1301,7 @@ function askToken() {
       <div><div class="eyebrow">ACCESS TOKEN</div><h2>输入工作台令牌</h2></div>
       <button class="icon-btn" onclick="closeModal()" aria-label="关闭">×</button>
     </div>
-    <p class="muted small">令牌位于项目目录的 <span class="mono">data/api_token.txt</span>。</p>
+    <p class="muted small">令牌在程序目录的 <span class="mono">data/api_token.txt</span>（源码运行时是项目根目录，安装版是安装目录）。</p>
     <label class="field">访问令牌
       <span class="input-with-action"><input id="tokenInput" type="password" value="${esc(state.token || '')}" autocomplete="off"><button type="button" class="btn tiny" onclick="toggleTokenVisibility()">显示</button></span>
     </label>
@@ -1342,7 +1348,13 @@ async function apiResult(path, options = {}) {
   if (text) {
     try { data = JSON.parse(text); } catch (error) { data = { message: text }; }
   }
-  if (response.status === 401 && path !== '/api/health') askToken();
+  if (response.status === 401 && path !== '/api/health') {
+    if (state.desktop) {
+      data = Object.assign({}, data, { message: '登录状态失效，请关闭窗口后重新打开 MsgDesk' });
+    } else {
+      askToken();
+    }
+  }
   return { ok: response.ok, status: response.status, data };
 }
 

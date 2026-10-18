@@ -19,6 +19,8 @@
 整个文件夹拷走就能迁移；卸载会保留 `config.json`、`data`、`digests`。
 
 不想安装也可以直接用绿色包：解压 `MsgDesk-win64.zip`，双击 `MsgDesk.exe`。
+想让绿色包直接带上现有数据，把仓库里的 `config.json`、`data\`、`digests\`
+复制到 `MsgDesk.exe` 旁边即可。
 
 安装目录里有两个 exe：
 

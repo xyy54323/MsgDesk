@@ -110,6 +110,20 @@ def _configure_stdio() -> None:
             pass
 
 
+def _fatal_window(message: str) -> None:
+    """Show a native message box when the app runs without a console."""
+    try:
+        from .paths import is_frozen
+
+        if not is_frozen():
+            return
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "MsgDesk", 0x10)
+    except Exception:  # noqa: BLE001 - best effort only
+        pass
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="msgdesk", description="个人消息收集与处理工作台")
     parser.add_argument("--config", help="配置文件路径，默认 ./config.json")
@@ -274,7 +288,16 @@ def cmd_serve(
 
     config = runtime.config
     token = runtime.ensure_api_token()
-    server = create_server(runtime)
+    try:
+        server = create_server(runtime)
+    except OSError:
+        message = (
+            f"端口 {config.system.port} 已被占用，可能已经有一个 MsgDesk 在运行。\n"
+            "关掉原来的窗口再试，或修改 config.json 里的 system.port。"
+        )
+        print(message, flush=True)
+        _fatal_window(message)
+        return 1
     if not no_scheduler:
         runtime.start_background()
     host, port = server.server_address[:2]
@@ -306,7 +329,10 @@ def cmd_serve(
             target=server.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True
         )
         thread.start()
-        target = f"http://{host}:{port}/?token={token}" if token else f"http://{host}:{port}/"
+        if token:
+            target = f"http://{host}:{port}/?token={token}&desktop=1"
+        else:
+            target = f"http://{host}:{port}/?desktop=1"
         webview.create_window(
             "MsgDesk 个人消息工作台",
             target,

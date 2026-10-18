@@ -1393,7 +1393,10 @@ def _redact_source(source: dict[str, Any]) -> dict[str, Any]:
 
 class ApiServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # Windows honours SO_REUSEADDR by letting two processes bind :8080, which
+    # silently splits requests between two different tokens.  Fail loudly
+    # instead so a second instance cannot hijack a running one.
+    allow_reuse_address = False
 
     def __init__(self, address: tuple[str, int], runtime: Runtime):
         self.runtime = runtime
