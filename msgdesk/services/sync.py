@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,7 +14,7 @@ from ..config import AppConfig
 from ..errors import AppError
 from ..models import Cursor
 from ..repository import Repository, dumps, loads, new_id
-from ..timeutil import iso_utc, local_date_of, utc_now
+from ..timeutil import iso_utc, local_date_of, local_zone, utc_now
 from .normalize import clean_text, content_hash, infer_content_type
 
 PLATFORM_DEDUPE_WINDOW = timedelta(days=30)
@@ -41,6 +41,7 @@ class SyncService:
             backfill_since=source_row.get("backfill_since"),
         )
         trace_id = str(uuid.uuid4())
+        history_range = self._history_range(config)
         if source_row["adapter_type"] == "ai_web":
             from .agent import AgentCollector
 
@@ -78,12 +79,15 @@ class SyncService:
             cursor_row = self.repo.get_cursor_row(source_id)
             cursor = Cursor.from_row(cursor_row)
             try:
-                result = adapter.fetch_incremental(
-                    source,
-                    cursor,
-                    FetchOptions(max_items=max_items,
-                                 timeout_seconds=float(config.get("timeout_seconds", 20))),
-                )
+                if history_range is not None and hasattr(adapter, "fetch_range"):
+                    result = adapter.fetch_range(source, history_range[0], history_range[1])
+                else:
+                    result = adapter.fetch_incremental(
+                        source,
+                        cursor,
+                        FetchOptions(max_items=max_items,
+                                     timeout_seconds=float(config.get("timeout_seconds", 20))),
+                    )
             except AppError as exc:
                 self.repo.mark_source_error(source_id, exc.code)
                 raise
@@ -224,6 +228,11 @@ class SyncService:
                     etag=next_cursor.etag,
                     last_modified=next_cursor.last_modified,
                 )
+        if history_range is not None and not result.partial:
+            config["history_imported_at"] = iso_utc()
+            config["history_imported_from"] = str(config.get("history_from") or "")
+            config["history_imported_to"] = str(config.get("history_to") or "")
+            self.repo.update_source(source_id, {"config": config})
         self.repo.mark_source_success(source_id)
         return {
             "trace_id": trace_id,
@@ -233,6 +242,33 @@ class SyncService:
             "warnings": result.warnings,
             "partial": result.partial,
         }
+
+    def _history_range(self, config: dict[str, Any]) -> tuple[datetime, datetime] | None:
+        """One-off history import window configured on the QQ source."""
+        start_text = str(config.get("history_from") or "").strip()
+        end_text = str(config.get("history_to") or "").strip()
+        if not start_text:
+            return None
+        if not end_text:
+            end_text = utc_now().astimezone(
+                local_zone(self.config.system.timezone)
+            ).date().isoformat()
+        config["history_to"] = end_text
+        if (
+            str(config.get("history_imported_at") or "").strip()
+            and str(config.get("history_imported_from") or "") == start_text
+            and str(config.get("history_imported_to") or "") == end_text
+        ):
+            return None
+        zone = local_zone(self.config.system.timezone)
+        try:
+            start = datetime.combine(datetime.fromisoformat(start_text).date(), time.min, zone)
+            end = datetime.combine(datetime.fromisoformat(end_text).date(), time.max, zone)
+        except ValueError:
+            return None
+        if end < start:
+            start, end = end, start
+        return start, end
 
     def _raw_dir(self) -> Path:
         now = utc_now().astimezone()

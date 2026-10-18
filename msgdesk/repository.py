@@ -509,6 +509,17 @@ class Repository:
                 return True
         return False
 
+    def open_digest_job_exists(self, date_text: str) -> bool:
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM jobs WHERE type = 'generate_digest' "
+                "AND status IN ('pending', 'running')"
+            ).fetchall()
+        return any(
+            str((loads(row["payload_json"]) or {}).get("date") or "") == date_text
+            for row in rows
+        )
+
     def update_message_status(self, message_id: str, status: str) -> None:
         with self.db.connection() as conn:
             conn.execute(

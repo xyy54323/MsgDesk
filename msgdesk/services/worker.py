@@ -91,9 +91,16 @@ class Worker:
                 self.conversation_digest_service.summarize(
                     source_id, conversation_id, date_text
                 )
+                if not self.repo.open_digest_job_exists(date_text):
+                    self.repo.enqueue_job(
+                        "generate_digest",
+                        payload={"date": date_text, "notify": False},
+                        priority=150,
+                    )
         elif job_type == "generate_digest":
             summary = self.digest_service.generate(payload.get("date"))
-            self.notification_service.notify_digest(summary["date"], summary)
+            if payload.get("notify", True):
+                self.notification_service.notify_digest(summary["date"], summary)
         elif job_type == "send_notification":
             message_id = job.get("message_id") or payload.get("message_id")
             channel = payload.get("channel")

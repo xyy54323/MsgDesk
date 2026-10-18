@@ -203,10 +203,145 @@ class QQOneBotAdapter(BaseAdapter):
         cursor: Cursor,
         count: int,
     ) -> list[dict[str, Any]]:
+        return self._history_range(
+            source,
+            conversation_id,
+            count=count,
+            start_sequence=cursor.last_platform_message_id or cursor.cursor_value or 0,
+            reverse=False,
+        )
+
+    def fetch_range(
+        self,
+        source: SourceContext,
+        start: "datetime",
+        end: "datetime",
+        *,
+        count: int = 50,
+        max_pages: int = MAX_PAGES,
+    ) -> FetchResult:
+        """Pull history between two local datetimes, newest page first."""
+        conversations = source.config.get("selected_conversations") or []
+        if not isinstance(conversations, list) or not conversations:
+            return FetchResult(
+                messages=[],
+                next_cursor=None,
+                warnings=["未选择 QQ 群，本次不采集"],
+                stats={"fetched": 0},
+            )
+        start_ts = start.timestamp()
+        end_ts = end.timestamp()
+        messages: list[RawMessage] = []
+        warnings: list[str] = []
+        for conversation in conversations:
+            conversation_id = str(conversation)
+            collected: dict[str, dict[str, Any]] = {}
+            sequence: Any = 0
+            reverse = False
+            try:
+                for _ in range(max_pages):
+                    batch = self._history_page(
+                        source,
+                        conversation_id,
+                        sequence=sequence,
+                        count=count,
+                        reverse=reverse,
+                    )
+                    if not batch:
+                        break
+                    fresh = 0
+                    for item in batch:
+                        key = str(item.get("message_id") or "")
+                        if key and key in collected:
+                            continue
+                        collected[key] = item
+                        fresh += 1
+                    times = [
+                        self._timestamp(item.get("time"))
+                        for item in batch
+                        if self._timestamp(item.get("time")) is not None
+                    ]
+                    if not times:
+                        break
+                    if min(times).timestamp() <= start_ts:
+                        break
+                    if fresh == 0:
+                        break
+                    earliest = min(
+                        batch,
+                        key=lambda item: (
+                            self._timestamp(item.get("time")) or start
+                        ).timestamp(),
+                    )
+                    sequence = int(earliest.get("message_id") or 0)
+                    reverse = True
+                    if sequence <= 0:
+                        break
+            except AppError as exc:
+                warnings.append(f"{conversation_id}: {exc.code}")
+                continue
+            for item in collected.values():
+                timestamp = self._timestamp(item.get("time"))
+                if timestamp is None:
+                    continue
+                if timestamp.timestamp() < start_ts or timestamp.timestamp() > end_ts:
+                    continue
+                converted = self._convert(item, conversation_id)
+                if converted is not None:
+                    messages.append(converted)
+        messages.sort(key=lambda item: item.published_at)
+        return FetchResult(
+            messages=messages,
+            next_cursor=None,
+            warnings=warnings,
+            stats={"fetched": len(messages)},
+        )
+
+    def _history_page(
+        self,
+        source: SourceContext,
+        conversation_id: str,
+        *,
+        sequence: Any,
+        count: int,
+        reverse: bool,
+    ) -> list[dict[str, Any]]:
         private = conversation_id.startswith("private:")
         target = conversation_id.split(":", 1)[1] if private else conversation_id
         action = "get_friend_msg_history" if private else "get_group_msg_history"
-        sequence = cursor.last_platform_message_id or cursor.cursor_value or 0
+        try:
+            sequence = int(sequence or 0)
+        except (TypeError, ValueError):
+            sequence = 0
+        params: dict[str, Any] = {
+            "count": count,
+            "message_seq": sequence,
+            "reverseOrder": reverse,
+        }
+        params["user_id" if private else "group_id"] = target
+        payload = self._call(source, action, params)
+        data = payload.get("data")
+        if isinstance(data, dict):
+            batch = data.get("messages") or data.get("message") or []
+        elif isinstance(data, list):
+            batch = data
+        else:
+            batch = []
+        return [item for item in batch if isinstance(item, dict)] if isinstance(batch, list) else []
+
+    def _history_range(
+        self,
+        source: SourceContext,
+        conversation_id: str,
+        *,
+        count: int,
+        start_sequence: Any,
+        reverse: bool,
+    ) -> list[dict[str, Any]]:
+        private = conversation_id.startswith("private:")
+        target = conversation_id.split(":", 1)[1] if private else conversation_id
+        action = "get_friend_msg_history" if private else "get_group_msg_history"
+        sequence = start_sequence or 0
         try:
             sequence = int(sequence)
         except (TypeError, ValueError):
@@ -217,7 +352,7 @@ class QQOneBotAdapter(BaseAdapter):
             params: dict[str, Any] = {
                 "count": count,
                 "message_seq": sequence,
-                "reverseOrder": False,
+                "reverseOrder": reverse,
             }
             params["user_id" if private else "group_id"] = target
             payload = self._call(source, action, params)

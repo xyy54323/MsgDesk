@@ -4,6 +4,7 @@ import json
 import threading
 import time
 import unittest
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -11,7 +12,7 @@ from msgdesk.adapters.qq_onebot import QQOneBotAdapter
 from msgdesk.adapters.base import FetchOptions, SourceContext
 from msgdesk.errors import AppError
 from msgdesk.models import Cursor
-from msgdesk.timeutil import iso_utc, utc_now
+from msgdesk.timeutil import iso_utc, local_zone, utc_now
 
 
 class _OneBotHandler(BaseHTTPRequestHandler):
@@ -180,6 +181,19 @@ class QQOneBotTests(unittest.TestCase):
         self.assertEqual(converted.sender_name, "班长")
         self.assertEqual(converted.conversation_kind, "group")
         self.assertTrue(converted.published_at.endswith("Z"))
+
+    def test_fetch_range_keeps_messages_inside_window(self) -> None:
+        now = int(time.time())
+        old = now - 40 * 86400
+        _OneBotHandler.messages = [
+            message(401, old, [{"type": "text", "data": {"text": "旧消息"}}]),
+            message(402, now, [{"type": "text", "data": {"text": "新消息"}}]),
+        ]
+        zone = local_zone("Asia/Shanghai")
+        start = datetime.fromtimestamp(old - 3600, zone)
+        end = datetime.fromtimestamp(old + 3600, zone)
+        result = QQOneBotAdapter().fetch_range(source(self.base), start, end)
+        self.assertEqual([m.content_text for m in result.messages], ["旧消息"])
 
     def test_no_write_actions_are_called(self) -> None:
         _OneBotHandler.messages = []
