@@ -334,6 +334,25 @@ class ApiHandler(BaseHTTPRequestHandler):
                 repo.audit("source.delete", "source", source_id, {"purge": purge})
                 return 200, {"deleted": source_id, "purged": purge}
 
+        if path == "/api/qq/status" and method == "GET":
+            from ..services import qq_bridge
+
+            return 200, qq_bridge.ensure_ready()
+
+        if path == "/api/qq/qr" and method == "GET":
+            from ..services import qq_bridge
+
+            if not qq_bridge.QR_PATH.exists():
+                raise AppError("NOT_FOUND", "还没有二维码，稍后再试")
+            body = qq_bridge.QR_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return None
+
         groups_match = re.fullmatch(r"/api/sources/([^/]+)/groups", path)
         if groups_match and method == "POST":
             source_id = groups_match.group(1)

@@ -2552,6 +2552,13 @@ function renderSourceConfigFields(type, config) {
       if (intervalEl && Number(intervalEl.value || 0) <= 60) intervalEl.value = 1440;
     }
     html += `<div class="field">
+      <span class="field-title">QQ 登录</span>
+      <div class="qq-login">
+        <div id="qqLoginStatus" class="muted tiny">正在检查 QQ 服务…</div>
+        <img id="qqQr" alt="QQ 登录二维码" style="display:none;width:180px;height:180px;border:2px solid var(--line);margin-top:8px">
+      </div>
+    </div>`;
+    html += `<div class="field">
       <span class="field-title">要采集的群</span>
       <span class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
         <button type="button" class="btn tiny" onclick="loadQqGroups()">刷新群列表</button>
@@ -2590,7 +2597,7 @@ function renderSourceConfigFields(type, config) {
         .map(String)
     );
     renderQqGroups();
-    loadQqGroups();
+    checkQqLogin();
   }
   if (type === 'ai_web') {
     state.promptFiles = Array.isArray(values.prompt_files) ? values.prompt_files.slice() : [];
@@ -2611,6 +2618,37 @@ async function refreshVisionSupport() {
       ? 'md 会拼进提示词；图片作为参考图一起发给模型。'
       : `当前模型${result.data.model ? '（' + result.data.model + '）' : ''}不支持图片输入，只能上传 md / txt。`;
   }
+}
+
+let qqLoginTimer = null;
+
+async function checkQqLogin() {
+  const status = document.getElementById('qqLoginStatus');
+  const image = document.getElementById('qqQr');
+  if (!status || !image) return;
+  clearTimeout(qqLoginTimer);
+  const result = await apiResult('/api/qq/status');
+  if (!result.ok) {
+    status.textContent = `QQ 服务检查失败：${result.data.message || ''}`;
+    return;
+  }
+  const data = result.data;
+  if (!data.installed) {
+    status.textContent = '还没安装本机的 QQ 桥（vendor/napcat），运行 scripts/napcat.py install';
+    image.style.display = 'none';
+    return;
+  }
+  if (data.logged_in) {
+    status.textContent = `已登录：${data.name || 'QQ'}（${data.uin}）`;
+    image.style.display = 'none';
+    loadQqGroups();
+    return;
+  }
+  status.textContent = '用手机 QQ 扫码登录（登录后这里会自动继续）';
+  const token = encodeURIComponent(state.token || '');
+  image.src = `/api/qq/qr?token=${token}&t=${Date.now()}`;
+  image.style.display = 'block';
+  qqLoginTimer = setTimeout(checkQqLogin, 3000);
 }
 
 function renderQqGroups() {
