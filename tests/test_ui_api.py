@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import json
+import threading
+import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from msgdesk.api.server import ApiServer
+from msgdesk.config import load_config
+from msgdesk.runtime import Runtime
+from msgdesk.timeutil import iso_utc
+
+
+def _request(
+    base: str, method: str, path: str, payload: dict | None = None
+) -> tuple[int, dict]:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(
+        base + path,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}")
+
+
+def _seed_message(repo, source_id: str, platform_id: str, text: str) -> str:
+    with repo.db.connection() as conn:
+        conversation_id = repo.upsert_conversation(
+            conn, source_id, "conversation-1", "测试群", "group"
+        )
+        message_id = repo.insert_message(
+            conn,
+            {
+                "source_id": source_id,
+                "conversation_id": conversation_id,
+                "platform_message_id": platform_id,
+                "published_at": iso_utc(),
+                "content_text": text,
+                "content_hash": f"hash-{platform_id}",
+            },
+        )
+    return message_id
+
+
+class UiApiTests(unittest.TestCase):
+    def _start(self, root: Path) -> tuple[Runtime, ApiServer, str, str]:
+        config_path = root / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "system": {"data_dir": "./data", "digest_dir": "./digests",
+                               "require_auth": False},
+                    "model": {"provider": "rules"},
+                    "notifications": {"channels": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        config = load_config(config_path)
+        config.system.require_auth = False
+        runtime = Runtime(config)
+        server = ApiServer(("127.0.0.1", 0), runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        source = runtime.repo.create_source(
+            {
+                "type": "mock_chat",
+                "name": "测试来源",
+                "adapter_type": "mock_chat",
+                "config": {"messages": []},
+            }
+        )
+        return runtime, server, base, source["id"]
+
+    def test_message_read_hide_and_purge(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, source_id = self._start(Path(tmp))
+            try:
+                first = _seed_message(
+                    runtime.repo, source_id, "m-1", "请于明天前完成报名"
+                )
+                second = _seed_message(
+                    runtime.repo, source_id, "m-2", "普通技术资讯"
+                )
+                runtime.repo.override_processing(first, {"priority": "urgent"})
+                runtime.repo.override_processing(second, {"priority": "normal"})
+
+                status, message = _request(
+                    base, "PATCH", f"/api/messages/{first}", {"is_read": True}
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(message["is_read"], 1)
+
+                status, result = _request(base, "GET", "/api/messages?unread=1")
+                self.assertEqual(status, 200)
+                self.assertEqual([m["id"] for m in result["messages"]], [second])
+
+                status, result = _request(base, "GET", "/api/messages?priority=urgent")
+                self.assertEqual(status, 200)
+                self.assertEqual([m["id"] for m in result["messages"]], [first])
+
+                status, result = _request(
+                    base,
+                    "GET",
+                    "/api/messages?q=" + urllib.parse.quote("报名"),
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual([m["id"] for m in result["messages"]], [first])
+
+                runtime.repo.reserve_notification(
+                    message_id=first,
+                    digest_date=None,
+                    channel="mock",
+                    dedupe_key=f"message:{first}",
+                    payload={},
+                )
+                status, result = _request(
+                    base, "DELETE", f"/api/messages/{first}?purge=false"
+                )
+                self.assertEqual(status, 200)
+                self.assertFalse(result["purged"])
+                self.assertIsNotNone(runtime.repo.get_message(first))
+                _, listing = _request(base, "GET", "/api/messages")
+                self.assertNotIn(first, [m["id"] for m in listing["messages"]])
+
+                status, result = _request(
+                    base, "DELETE", f"/api/messages/{first}?purge=true"
+                )
+                self.assertEqual(status, 200)
+                self.assertTrue(result["purged"])
+                self.assertIsNone(runtime.repo.get_message(first))
+                self.assertEqual(runtime.repo.list_notifications(), [])
+
+                status, result = _request(
+                    base,
+                    "POST",
+                    "/api/messages/batch-delete",
+                    {"ids": [second], "purge": False},
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(result["deleted"], 1)
+                _, listing = _request(base, "GET", "/api/messages")
+                self.assertEqual(listing["messages"], [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_model_settings_are_persisted_and_applied(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, _ = self._start(Path(tmp))
+            try:
+                status, saved = _request(
+                    base,
+                    "POST",
+                    "/api/models",
+                    {
+                        "provider": "openai_compatible",
+                        "base_url": "http://127.0.0.1:9/v1",
+                        "model": "test-model",
+                        "api_key": "secret-model-key",
+                        "api_key_env": "CUSTOM_MODEL_KEY",
+                        "timeout_seconds": 5,
+                    },
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(saved["provider"], "openai_compatible")
+                self.assertNotIn("secret-model-key", json.dumps(saved))
+                self.assertEqual(runtime.model.name, "openai_compatible")
+
+                status, current = _request(base, "GET", "/api/models")
+                self.assertEqual(status, 200)
+                self.assertTrue(current["config"]["api_key_set"])
+                self.assertNotIn("secret-model-key", json.dumps(current))
+
+                raw = json.loads(
+                    (Path(tmp) / "config.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(raw["model"]["api_key"], "secret-model-key")
+                self.assertEqual(raw["model"]["model"], "test-model")
+                self.assertEqual(raw["model"]["api_key_env"], "CUSTOM_MODEL_KEY")
+
+                status, error = _request(
+                    base, "POST", "/api/models", {"provider": "unknown"}
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(error["code"], "VALIDATION_ERROR")
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_source_masked_secret_is_preserved(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, _ = self._start(Path(tmp))
+            try:
+                status, created = _request(
+                    base,
+                    "POST",
+                    "/api/sources",
+                    {
+                        "type": "qq_onebot",
+                        "name": "QQ 测试群",
+                        "config": {
+                            "base_url": "http://127.0.0.1:3000",
+                            "access_token": "source-secret",
+                            "selected_conversations": ["1"],
+                        },
+                    },
+                )
+                self.assertEqual(status, 201)
+                source_id = created["id"]
+                self.assertEqual(created["config"]["access_token"], "***")
+
+                status, updated = _request(
+                    base,
+                    "PATCH",
+                    f"/api/sources/{source_id}",
+                    {
+                        "config": {
+                            "base_url": "http://127.0.0.1:3000",
+                            "access_token": "***",
+                            "selected_conversations": ["1", "2"],
+                        }
+                    },
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(updated["config"]["access_token"], "***")
+                stored = runtime.repo.get_source(source_id)
+                stored_config = json.loads(stored["config_json"])
+                self.assertEqual(stored_config["access_token"], "source-secret")
+                self.assertEqual(stored_config["selected_conversations"], ["1", "2"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_notification_channel_and_settings(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, _ = self._start(Path(tmp))
+            try:
+                status, created = _request(
+                    base,
+                    "POST",
+                    "/api/notification-channels",
+                    {
+                        "id": "phone",
+                        "type": "pushplus",
+                        "enabled": True,
+                        "config": {"token": "token-abc", "min_priority": "normal"},
+                    },
+                )
+                self.assertEqual(status, 200)
+                self.assertNotIn("token-abc", json.dumps(created))
+
+                _, listed = _request(base, "GET", "/api/notification-channels")
+                channel = next(c for c in listed["channels"] if c["id"] == "phone")
+                self.assertEqual(channel["config"]["token"], "***")
+
+                status, _ = _request(
+                    base,
+                    "POST",
+                    "/api/notification-channels",
+                    {
+                        "id": "phone",
+                        "type": "pushplus",
+                        "config": {
+                            "token": "***",
+                            "min_priority": "urgent",
+                            "notify_digest": True,
+                        },
+                    },
+                )
+                self.assertEqual(status, 200)
+                stored = next(
+                    c for c in runtime.config.notifications.channels if c.id == "phone"
+                )
+                self.assertEqual(stored.config["token"], "token-abc")
+                self.assertEqual(stored.config["min_priority"], "urgent")
+                self.assertTrue(stored.config["notify_digest"])
+
+                status, settings = _request(
+                    base,
+                    "POST",
+                    "/api/notifications/settings",
+                    {
+                        "min_priority": "normal",
+                        "hourly_limit": 3,
+                        "quiet_hours": {
+                            "start": "22:30",
+                            "end": "06:30",
+                            "allow_urgent": False,
+                        },
+                    },
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(settings["hourly_limit"], 3)
+                self.assertFalse(settings["quiet_hours"]["allow_urgent"])
+
+                raw = json.loads(
+                    (Path(tmp) / "config.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(raw["notifications"]["channels"][0]["config"]["token"],
+                                 "token-abc")
+                self.assertEqual(raw["notifications"]["hourly_limit"], 3)
+                self.assertEqual(raw["scheduling"]["quiet_hours"]["start"], "22:30")
+
+                status, error = _request(
+                    base,
+                    "POST",
+                    "/api/notifications/settings",
+                    {"quiet_hours": {"start": "25:00"}},
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(error["code"], "VALIDATION_ERROR")
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+
+if __name__ == "__main__":
+    unittest.main()

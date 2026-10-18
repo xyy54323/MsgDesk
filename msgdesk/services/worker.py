@@ -1,0 +1,114 @@
+"""Persistent job worker."""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+from typing import Any
+
+from ..errors import AppError
+from ..repository import Repository, loads
+from .digest import DigestService
+from .notifications import NotificationService
+from .processing import ProcessingService
+from .sync import SyncService
+
+log = logging.getLogger("msgdesk.worker")
+
+
+class Worker:
+    def __init__(
+        self,
+        repo: Repository,
+        sync_service: SyncService,
+        processing_service: ProcessingService,
+        digest_service: DigestService,
+        notification_service: NotificationService,
+    ):
+        self.repo = repo
+        self.sync_service = sync_service
+        self.processing_service = processing_service
+        self.digest_service = digest_service
+        self.notification_service = notification_service
+
+    def run_once(self) -> bool:
+        job = self.repo.claim_next_job()
+        if job is None:
+            return False
+        self.repo.current_job_id = job["id"]
+        self.repo.current_source_id = job.get("source_id")
+        try:
+            self.dispatch(job)
+        except AppError as exc:
+            log.warning("job %s failed: %s", job["id"], exc)
+            self.repo.finish_job(
+                job["id"],
+                error_code=exc.code,
+                error_message=exc.message[:500],
+                retryable=exc.retryable,
+            )
+        except Exception as exc:
+            log.exception("job %s crashed", job["id"])
+            self.repo.finish_job(
+                job["id"],
+                error_code="INTERNAL_ERROR",
+                error_message=f"{type(exc).__name__}: {str(exc)[:300]}",
+                retryable=False,
+            )
+        else:
+            self.repo.finish_job(job["id"])
+        finally:
+            self.repo.current_job_id = None
+            self.repo.current_source_id = None
+        return True
+
+    def dispatch(self, job: dict[str, Any]) -> None:
+        payload = loads(job.get("payload_json"), {}) or {}
+        job_type = job["type"]
+        if job_type == "sync_source":
+            source_id = job.get("source_id") or payload.get("source_id")
+            if not source_id:
+                raise AppError("VALIDATION_ERROR", "sync_source 任务缺少 source_id")
+            self.sync_service.sync_source(source_id, max_items=int(payload.get("max_items", 50)))
+        elif job_type == "process_message":
+            message_id = job.get("message_id") or payload.get("message_id")
+            if not message_id:
+                raise AppError("VALIDATION_ERROR", "process_message 任务缺少 message_id")
+            self.processing_service.process(
+                message_id, force=bool(payload.get("force")), raise_on_model_error=True
+            )
+        elif job_type == "generate_digest":
+            summary = self.digest_service.generate(payload.get("date"))
+            self.notification_service.notify_digest(summary["date"], summary)
+        elif job_type == "send_notification":
+            message_id = job.get("message_id") or payload.get("message_id")
+            channel = payload.get("channel")
+            if not message_id or not channel:
+                raise AppError("VALIDATION_ERROR", "send_notification 任务参数不完整")
+            self.notification_service.notify_message(message_id, channel)
+        else:
+            raise AppError("VALIDATION_ERROR", f"未知任务类型: {job_type}")
+
+    def run_forever(self, stop_event: threading.Event, poll_seconds: float = 1.0) -> None:
+        while not stop_event.is_set():
+            try:
+                worked = self.run_once()
+            except Exception:
+                log.exception("worker loop error")
+                worked = False
+            if not worked:
+                stop_event.wait(poll_seconds)
+
+
+def enqueue_run_all(repo: Repository) -> list[str]:
+    """Queue a sync for every enabled source; used by the overview button."""
+    job_ids = []
+    for source in repo.enabled_sources():
+        if repo.has_active_job("sync_source", source_id=source["id"]):
+            continue
+        job_ids.append(
+            repo.enqueue_job("sync_source", source_id=source["id"], priority=40)
+        )
+    return job_ids
+

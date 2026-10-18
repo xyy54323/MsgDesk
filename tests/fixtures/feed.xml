@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>测试资讯源</title>
+    <link>https://example.com/</link>
+    <description>fixture</description>
+    <item>
+      <title>教务处关于期中考试报名的通知</title>
+      <link>https://example.com/exam</link>
+      <guid>fixture-exam-1</guid>
+      <pubDate>Sun, 18 Oct 2026 08:00:00 +0800</pubDate>
+      <description><![CDATA[请各位同学于 2026-10-20 18:00 前完成期中考试报名，逾期不再受理。报名入口见教务系统。]]></description>
+    </item>
+    <item>
+      <title>开源项目发布新的本地检索方案</title>
+      <link>https://example.com/tech</link>
+      <guid>fixture-tech-1</guid>
+      <pubDate>Sun, 18 Oct 2026 07:00:00 +0800</pubDate>
+      <description><![CDATA[该项目使用 SQLite 和轻量索引实现本地全文检索，支持中文分词和增量更新，适合个人知识库场景，并提供可替换的模型接口。]]></description>
+    </item>
+    <item>
+      <title>周末社区活动通知</title>
+      <link>https://example.com/life</link>
+      <guid>fixture-life-1</guid>
+      <pubDate>Sun, 18 Oct 2026 06:00:00 +0800</pubDate>
+      <description><![CDATA[本周六上午十点在社区中心举办读书交流活动，感兴趣的同学可以参加，无需报名。]]></description>
+    </item>
+  </channel>
+</rss>
+
