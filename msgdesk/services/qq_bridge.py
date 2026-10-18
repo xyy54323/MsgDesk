@@ -111,6 +111,13 @@ def configure_onebot() -> bool:
     return changed
 
 
+def relogin() -> None:
+    """Restart without the saved account so a new QR code is shown."""
+    stop()
+    time.sleep(1)
+    start(None)
+
+
 def ensure_ready() -> dict[str, Any]:
     """Start NapCat, wire the endpoint, and report what the UI should show."""
     if not installed():

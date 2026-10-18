@@ -2353,7 +2353,7 @@ function sourceStatus(source) {
 function sourceDetail(source) {
   const config = source.config || {};
   if (source.adapter_type === 'chat_import') return `导入目录：${config.directory || '未配置'}`;
-  if (source.adapter_type === 'qq_onebot') return `OneBot：${config.base_url || '未配置地址'}`;
+  if (source.adapter_type === 'qq_onebot') return '本机 QQ 服务（NapCat）· 群聊只读';
   if (config.url) return config.url;
   return '只读适配器';
 }
@@ -2370,9 +2370,6 @@ function renderSources() {
       </div>`;
     return;
   }
-  const qqAccount = state.accounts.find(account =>
-    account.platform === 'qq' || account.platform === 'qq_onebot'
-  );
   container.innerHTML = state.sources.map(source => `
     <article class="model-provider-card">
       <div>
@@ -2382,7 +2379,7 @@ function renderSources() {
           <span class="badge normal">${esc(typeLabel(source.type || source.adapter_type))}</span>
           <span class="badge low">每 ${esc(intervalText(source.interval_seconds))}</span>
           ${source.adapter_type === 'qq_onebot'
-            ? `<span class="badge ${qqAccount && qqAccount.status === 'ready' ? 'ok' : 'low'}">QQ ${esc(qqAccount ? (qqAccount.status || '未知') : '未登记账号')}</span>`
+            ? `<span class="badge normal">${(source.config && source.config.selected_conversations || []).length} 个群</span>`
             : ''}
           ${source.config && !source.config.cookie_invalid && source.config.cookie_expires
             ? `<span class="badge ${new Date(source.config.cookie_expires).getTime() < Date.now() ? 'bad' : 'low'}">
@@ -2554,7 +2551,10 @@ function renderSourceConfigFields(type, config) {
     html += `<div class="field">
       <span class="field-title">QQ 登录</span>
       <div class="qq-login">
-        <div id="qqLoginStatus" class="muted tiny">正在检查 QQ 服务…</div>
+        <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
+          <span id="qqLoginStatus" class="muted tiny">正在检查 QQ 服务…</span>
+          <button type="button" class="btn tiny" onclick="reloginQq()">重新登录</button>
+        </div>
         <img id="qqQr" alt="QQ 登录二维码" style="display:none;width:180px;height:180px;border:2px solid var(--line);margin-top:8px">
       </div>
     </div>`;
@@ -2621,6 +2621,13 @@ async function refreshVisionSupport() {
 }
 
 let qqLoginTimer = null;
+
+async function reloginQq() {
+  const status = document.getElementById('qqLoginStatus');
+  if (status) status.textContent = '正在重启 QQ 服务，稍等…';
+  await apiResult('/api/qq/relogin', { method: 'POST', body: '{}' });
+  setTimeout(checkQqLogin, 4000);
+}
 
 async function checkQqLogin() {
   const status = document.getElementById('qqLoginStatus');

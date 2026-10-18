@@ -339,6 +339,12 @@ class ApiHandler(BaseHTTPRequestHandler):
 
             return 200, qq_bridge.ensure_ready()
 
+        if path == "/api/qq/relogin" and method == "POST":
+            from ..services import qq_bridge
+
+            qq_bridge.relogin()
+            return 200, {"status": "restarting"}
+
         if path == "/api/qq/qr" and method == "GET":
             from ..services import qq_bridge
 
