@@ -1,4 +1,11 @@
 {
+  "profile": {
+    "identity": "",
+    "interests": "",
+    "ignore": "",
+    "todo_rule": "",
+    "notes": ""
+  },
   "system": {
     "timezone": "Asia/Shanghai",
     "data_dir": "./data",

@@ -164,6 +164,9 @@ class OpenAICompatibleModel(ModelProvider):
             "category 从 [学习,学校通知,技术,项目,行业,生活,待办,其他] 选择；"
             "summary_short 用一句话概括；action_items 是字符串数组。"
         )
+        profile = str(context.get("profile") or "").strip()
+        if profile:
+            prompt += "\n\n" + profile
         text = message.text[: self.config.max_input_chars]
         payload = {
             "model": self.config.model,

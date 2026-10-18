@@ -24,6 +24,7 @@ from ..adapters.web import _parse_page
 from ..errors import AppError
 from ..models import Cursor, FetchResult, RawMessage
 from ..timeutil import iso_utc, local_zone, parse_datetime
+from .profile_prompt import profile_prompt
 
 MAX_STEPS = 12
 MAX_ITEMS = 15
@@ -326,6 +327,9 @@ class AgentCollector:
         )
         if extra:
             base += "\n\n用户的采集要求（优先遵守）：\n" + extra
+        profile = profile_prompt(self.config.profile)
+        if profile:
+            base += "\n\n" + profile
         if docs:
             base += "\n\n参考文档：\n" + docs
         return base

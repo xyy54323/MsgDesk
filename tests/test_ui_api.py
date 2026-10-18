@@ -154,6 +154,32 @@ class UiApiTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+
+    def test_profile_round_trip(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, server, base, _ = self._start(root)
+            try:
+                status, payload = _request(base, "POST", "/api/profile", {
+                    "profile": {
+                        "identity": "2026 级研究生",
+                        "interests": "奖学金、比赛",
+                        "ignore": "行政报送",
+                        "todo_rule": "只算需要我本人提交的事",
+                        "notes": "导师方向是嵌入式",
+                    }
+                })
+                self.assertEqual(status, 200)
+                status, payload = _request(base, "GET", "/api/profile")
+                self.assertEqual(status, 200)
+                profile = payload["profile"]
+                self.assertEqual(profile["identity"], "2026 级研究生")
+                self.assertEqual(profile["ignore"], "行政报送")
+                saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["profile"]["todo_rule"], "只算需要我本人提交的事")
+            finally:
+                server.shutdown()
+                server.server_close()
                 runtime.stop()
 
     def test_model_settings_are_persisted_and_applied(self):

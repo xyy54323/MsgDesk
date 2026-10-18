@@ -11,6 +11,7 @@ from ..errors import AppError
 from ..repository import Repository, loads
 from ..timeutil import iso_utc, local_date_of, utc_now
 from .model import ModelInput, ModelProvider, RuleBasedModel
+from .profile_prompt import profile_prompt
 from .rules import RuleEngine
 
 PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
@@ -83,7 +84,13 @@ class ProcessingService:
                         f"→ {provider.model_name} 处理消息",
                         f"[source] {message.get('source_name') or ''}\n\n{text[:4000]}",
                     )
-                    model_result = provider.analyze(model_input, {"rules": rules})
+                    model_result = provider.analyze(
+                        model_input,
+                        {
+                            "rules": rules,
+                            "profile": profile_prompt(self.config.profile),
+                        },
+                    )
                     self.repo.add_trace(
                         "reply",
                         f"← {provider.model_name}",

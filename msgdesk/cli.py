@@ -24,6 +24,13 @@ from .runtime import Runtime
 from .timeutil import iso_utc, local_now_text, local_zone, utc_now
 
 CONFIG_TEMPLATE = {
+    "profile": {
+        "identity": "",
+        "interests": "",
+        "ignore": "",
+        "todo_rule": "",
+        "notes": "",
+    },
     "system": {
         "timezone": "Asia/Shanghai",
         "data_dir": "./data",

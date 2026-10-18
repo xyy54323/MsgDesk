@@ -771,6 +771,9 @@
       <button class="nav-item" data-view="reminders" onclick="showView('reminders')">
         <span class="nav-icon">◎</span><span>提醒</span>
       </button>
+      <button class="nav-item" data-view="profile" onclick="showView('profile')">
+        <span class="nav-icon">◍</span><span>个人画像</span>
+      </button>
     </nav>
     <div class="sidebar-foot">
       <div class="service-line"><span class="dot" id="serviceDot"></span><span id="serviceText">连接中</span></div>
@@ -993,6 +996,45 @@
           </div>
         </div>
       </section>
+
+      <section class="view" id="view-profile">
+        <div class="panel" style="max-width:900px">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">PROFILE</div>
+              <h2>个人画像</h2>
+            </div>
+          </div>
+          <p class="muted small" style="margin:0 0 16px">
+            这些内容会作为背景信息交给模型，用来判断哪些通知与你有关、哪些算你的待办。
+            每个来源自己的采集提示词仍然优先。
+          </p>
+          <label class="field">
+            <span class="field-title">我是谁</span>
+            <textarea id="profileIdentity" rows="2" placeholder="例如：齐齐哈尔大学计控学院 2026 级研究生"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-title">我关心什么</span>
+            <textarea id="profileInterests" rows="3" placeholder="例如：比赛、奖学金、课程通知、科研项目、就业信息"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-title">我不关心什么</span>
+            <textarea id="profileIgnore" rows="3" placeholder="例如：行政报送、其他学院事务、纯转发通知"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-title">什么算我的待办</span>
+            <textarea id="profileTodoRule" rows="3" placeholder="例如：需要我本人报名、提交、缴费、参会或截止前完成的事"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-title">补充说明</span>
+            <textarea id="profileNotes" rows="3" placeholder="任何希望模型知道的背景，比如导师方向、在做的项目、作息偏好"></textarea>
+          </label>
+          <div class="row" style="margin-top:16px;gap:8px">
+            <button class="btn primary" onclick="saveProfile()">保存</button>
+            <span class="muted tiny" id="profileStatus"></span>
+          </div>
+        </div>
+      </section>
     </div>
   </main>
 </div>
@@ -1019,13 +1061,14 @@
 <div class="top-notice-stack" id="topNotice" aria-live="polite"></div>
 
 <script>
-const VIEWS = ['workbench', 'messages', 'sources', 'model', 'reminders'];
+const VIEWS = ['workbench', 'messages', 'sources', 'model', 'reminders', 'profile'];
 const VIEW_TITLES = {
   workbench: '工作台',
   messages: '消息',
   sources: '来源',
   model: '模型配置',
-  reminders: '提醒'
+  reminders: '提醒',
+  profile: '个人画像'
 };
 const PRIORITY_LABEL = { urgent: '紧急', high: '高', normal: '普通', low: '低' };
 const STATUS_LABEL = {
@@ -1437,6 +1480,7 @@ function showView(view) {
   if (next === 'sources') loadSources();
   if (next === 'model') loadModel();
   if (next === 'reminders') loadReminders();
+  if (next === 'profile') loadProfile();
   saveUiState();
 }
 
@@ -3474,6 +3518,45 @@ async function deleteModel(id) {
 }
 
 /* Reminders ----------------------------------------------------------- */
+async function loadProfile() {
+  const result = await apiResult('/api/profile');
+  if (!result.ok) return;
+  const profile = result.data.profile || {};
+  const values = {
+    profileIdentity: profile.identity || '',
+    profileInterests: profile.interests || '',
+    profileIgnore: profile.ignore || '',
+    profileTodoRule: profile.todo_rule || '',
+    profileNotes: profile.notes || ''
+  };
+  Object.keys(values).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = values[id];
+  });
+  const status = document.getElementById('profileStatus');
+  if (status) status.textContent = '';
+}
+
+async function saveProfile() {
+  const status = document.getElementById('profileStatus');
+  const payload = {
+    identity: document.getElementById('profileIdentity')?.value || '',
+    interests: document.getElementById('profileInterests')?.value || '',
+    ignore: document.getElementById('profileIgnore')?.value || '',
+    todo_rule: document.getElementById('profileTodoRule')?.value || '',
+    notes: document.getElementById('profileNotes')?.value || ''
+  };
+  const result = await apiResult('/api/profile', {
+    method: 'POST',
+    body: JSON.stringify({ profile: payload })
+  });
+  if (!result.ok) {
+    if (status) status.textContent = `保存失败：${result.data.message || ''}`;
+    return;
+  }
+  if (status) status.textContent = '已保存，从下一次处理开始生效。';
+}
+
 async function loadReminders() {
   const result = await apiResult('/api/notification-channels');
   if (!result.ok) {

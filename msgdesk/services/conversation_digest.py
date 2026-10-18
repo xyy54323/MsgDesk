@@ -9,6 +9,7 @@ from ..errors import AppError
 from ..repository import loads
 from ..timeutil import local_date_of
 from .model import chat_text
+from .profile_prompt import profile_prompt
 
 log = logging.getLogger("msgdesk.conversation_digest")
 
@@ -58,6 +59,9 @@ class ConversationDigestService:
         system = SYSTEM_PROMPT
         if extra:
             system += "\n\n用户的整理要求（优先遵守）：\n" + extra
+        profile = profile_prompt(self.config.profile)
+        if profile:
+            system += "\n\n" + profile
         try:
             summary = chat_text(self.config.model, system, user)
         except AppError as exc:

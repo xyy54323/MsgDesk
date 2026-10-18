@@ -227,6 +227,30 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "disk_free_mb": round(disk.free / 1024 / 1024, 1),
             }
 
+        if path == "/api/profile" and method == "GET":
+            profile = config.profile
+            return 200, {
+                "profile": {
+                    "identity": profile.identity,
+                    "interests": profile.interests,
+                    "ignore": profile.ignore,
+                    "todo_rule": profile.todo_rule,
+                    "notes": profile.notes,
+                }
+            }
+
+        if path == "/api/profile" and method in ("POST", "PUT"):
+            payload = body.get("profile") if isinstance(body.get("profile"), dict) else body
+            keys = ("identity", "interests", "ignore", "todo_rule", "notes")
+            cleaned = {key: str(payload.get(key) or "").strip() for key in keys}
+            if not config.config_path:
+                raise AppError("CONFIG_INVALID", "没有配置文件，无法保存个人画像")
+            merge_config_file(config.config_path, {"profile": cleaned})
+            for key, value in cleaned.items():
+                setattr(config.profile, key, value)
+            repo.audit("profile.update", "profile", "")
+            return 200, {"profile": cleaned}
+
         if method == "GET" and path == "/api/status":
             sources = repo.list_sources()
             now = utc_now()

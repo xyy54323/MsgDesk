@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -95,11 +95,23 @@ class NotificationConfig:
 
 
 @dataclass
+class ProfileConfig:
+    """How the user wants the model to understand them."""
+
+    identity: str = ""
+    interests: str = ""
+    ignore: str = ""
+    todo_rule: str = ""
+    notes: str = ""
+
+
+@dataclass
 class AppConfig:
     system: SystemConfig = field(default_factory=SystemConfig)
     scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
+    profile: ProfileConfig = field(default_factory=ProfileConfig)
     config_path: Path | None = None
     base_dir: Path = PROJECT_ROOT
 
@@ -327,7 +339,7 @@ def _merge_dataclass(instance: Any, data: dict[str, Any]) -> Any:
         if not hasattr(instance, key):
             continue
         current = getattr(instance, key)
-        if isinstance(current, QuietHours) and isinstance(value, dict):
+        if is_dataclass(current) and not isinstance(current, type) and isinstance(value, dict):
             _merge_dataclass(current, value)
         elif isinstance(current, list):
             continue
@@ -358,6 +370,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         quiet = raw.get("scheduling", {}).get("quiet_hours")
         if isinstance(quiet, dict):
             _merge_dataclass(config.scheduling.quiet_hours, quiet)
+        _merge_dataclass(config.profile, raw.get("profile", {}) if isinstance(raw.get("profile"), dict) else {})
         raw_model = raw.get("model", {})
         if not isinstance(raw_model, dict):
             raw_model = {}
