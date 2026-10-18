@@ -187,6 +187,27 @@
   .field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
   .field.wide { grid-column: 1 / -1; }
   .field input, .field select, .field textarea { color: var(--ink); font-size: 13px; }
+  .pixel-date { position: relative; display: inline-flex; gap: 6px; justify-self: start; }
+  .pixel-date input { width: 132px; cursor: pointer; font: 12px/1 "Cascadia Mono", Consolas, monospace; }
+  .pixel-calendar {
+    position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 240px;
+    padding: 10px; background: var(--panel); border: 2px solid var(--line);
+    box-shadow: var(--shadow); font: 12px/1.25 "Cascadia Mono", Consolas, monospace;
+  }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cal-title { font-weight: 700; letter-spacing: .04em; }
+  .cal-nav { display: flex; gap: 4px; }
+  .cal-nav button, .cal-foot button {
+    border: 1px solid var(--line); background: var(--panel-2); padding: 2px 6px;
+    cursor: pointer; font: inherit;
+  }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-grid span { text-align: center; color: var(--muted); padding: 2px 0; font-size: 10px; }
+  .cal-day { padding: 4px 0; border: 1px solid transparent; background: transparent; cursor: pointer; font: inherit; }
+  .cal-day:hover { border-color: var(--line); background: var(--panel-2); }
+  .cal-day.today { border-color: var(--olive); }
+  .cal-day.sel { background: var(--olive); color: #151911; border-color: var(--line); }
+  .cal-foot { display: flex; justify-content: space-between; margin-top: 8px; }
   .advanced { margin-top: 12px; }
   .advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   .advanced[open] summary { color: var(--ink); }
@@ -2678,7 +2699,13 @@ function renderSourceConfigFields(type, config) {
     </div>
     <div class="field">
       <span class="field-title">从哪天开始回补</span>
-      <input id="cfgHistoryFrom" type="date" value="${esc(values.history_from || '')}" style="width:auto">
+      <div class="pixel-date">
+        <input id="cfgHistoryFrom" readonly placeholder="YYYY-MM-DD"
+               value="${esc(values.history_from || '')}" onclick="toggleHistoryCalendar(event)">
+        <button type="button" class="btn tiny" onclick="toggleHistoryCalendar(event)">▦</button>
+        <div class="pixel-calendar" id="historyCalendar" style="display:none"
+             onclick="event.stopPropagation()"></div>
+      </div>
       <span class="muted tiny">只填起始日期，自动补到今天；下次同步按天各生成一份日报。</span>
     </div>
     <p class="muted tiny" style="grid-column:1/-1;margin:2px 0 0">
@@ -2860,6 +2887,82 @@ async function checkQqLogin() {
   }
   qqLoginTimer = setTimeout(checkQqLogin, 2000);
 }
+
+let historyCalMonth = null;
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function historyDateValue() {
+  return document.getElementById('cfgHistoryFrom')?.value || '';
+}
+
+function toggleHistoryCalendar(event) {
+  if (event) event.stopPropagation();
+  const popup = document.getElementById('historyCalendar');
+  if (!popup) return;
+  if (popup.style.display === 'block') {
+    popup.style.display = 'none';
+    return;
+  }
+  const current = historyDateValue();
+  historyCalMonth = current ? new Date(current + 'T00:00:00') : new Date();
+  renderHistoryCalendar();
+  popup.style.display = 'block';
+}
+
+function shiftHistoryMonth(delta) {
+  historyCalMonth = new Date(
+    historyCalMonth.getFullYear(), historyCalMonth.getMonth() + delta, 1
+  );
+  renderHistoryCalendar();
+}
+
+function pickHistoryDate(value) {
+  const input = document.getElementById('cfgHistoryFrom');
+  if (input) input.value = value || '';
+  const popup = document.getElementById('historyCalendar');
+  if (popup) popup.style.display = 'none';
+}
+
+function renderHistoryCalendar() {
+  const popup = document.getElementById('historyCalendar');
+  if (!popup || !historyCalMonth) return;
+  const year = historyCalMonth.getFullYear();
+  const month = historyCalMonth.getMonth();
+  const selected = historyDateValue();
+  const today = localToday();
+  const offset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const days = new Date(year, month + 1, 0).getDate();
+  let html = `<div class="cal-head">
+      <div class="cal-title">${year} 年 ${month + 1} 月</div>
+      <div class="cal-nav">
+        <button type="button" onclick="shiftHistoryMonth(-1)">↑</button>
+        <button type="button" onclick="shiftHistoryMonth(1)">↓</button>
+      </div>
+    </div><div class="cal-grid">`;
+  ['一', '二', '三', '四', '五', '六', '日'].forEach(day => {
+    html += `<span>${day}</span>`;
+  });
+  for (let index = 0; index < offset; index++) html += '<span></span>';
+  for (let day = 1; day <= days; day++) {
+    const value = `${year}-${pad2(month + 1)}-${pad2(day)}`;
+    const classes = ['cal-day', value === today ? 'today' : '', value === selected ? 'sel' : '']
+      .filter(Boolean).join(' ');
+    html += `<button type="button" class="${classes}" onclick="pickHistoryDate('${value}')">${day}</button>`;
+  }
+  html += `</div><div class="cal-foot">
+      <button type="button" onclick="pickHistoryDate('')">清除</button>
+      <button type="button" onclick="pickHistoryDate('${today}')">今天</button>
+    </div>`;
+  popup.innerHTML = html;
+}
+
+document.addEventListener('click', () => {
+  const popup = document.getElementById('historyCalendar');
+  if (popup) popup.style.display = 'none';
+});
 
 function renderQqGroups() {
   const box = document.getElementById('qqGroupList');
