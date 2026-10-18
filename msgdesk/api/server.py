@@ -422,6 +422,23 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
                 validation = adapter.validate_config(source_config)
                 if action == "test":
+                    if source["adapter_type"] == "qq_onebot":
+                        try:
+                            groups = adapter.list_groups(context)  # type: ignore[attr-defined]
+                        except AppError as exc:
+                            return 200, {
+                                "validation": {"ok": False, "message": exc.message},
+                                "capabilities": adapter.get_capabilities().to_dict(),
+                                "status": {"status": exc.code},
+                            }
+                        return 200, {
+                            "validation": {
+                                "ok": True,
+                                "message": f"已连接本机 QQ 服务，共 {len(groups)} 个群",
+                            },
+                            "capabilities": adapter.get_capabilities().to_dict(),
+                            "status": {"status": "ready"},
+                        }
                     if source["adapter_type"] in ("web", "ai_web") and validation.ok:
                         from ..adapters.base import HttpFetcher
                         from ..adapters.web import _parse_page

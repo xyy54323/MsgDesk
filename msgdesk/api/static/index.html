@@ -377,6 +377,18 @@
     max-height: 178px; overflow: auto;
     border: 2px solid var(--line); background: #FBF5E6;
   }
+  .qq-groups summary {
+    display: flex; align-items: baseline; gap: 8px;
+    cursor: pointer; font-size: 13px; color: var(--ink); list-style: none;
+  }
+  .qq-groups summary::-webkit-details-marker { display: none; }
+  .qq-groups summary::before { content: "▸ "; color: var(--muted); }
+  .qq-groups[open] summary::before { content: "▾ "; }
+  .qq-group-tools {
+    display: flex; align-items: center; gap: 8px;
+    max-width: 620px; margin: 8px 0;
+  }
+  .qq-group-tools input { flex: 1; }
   .qq-group-item {
     display: grid; grid-template-columns: 20px minmax(0, 1fr) auto;
     gap: 8px; align-items: center;
@@ -2558,18 +2570,16 @@ function renderSourceConfigFields(type, config) {
         <img id="qqQr" alt="QQ 登录二维码" style="display:none;width:180px;height:180px;border:2px solid var(--line);margin-top:8px">
       </div>
     </div>`;
-    html += `<div class="field">
-      <span class="field-title">要采集的群</span>
-      <span class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
+    html += `<details class="field qq-groups">
+      <summary>要采集的群 <span class="muted tiny" id="qqGroupHint">正在读取…</span></summary>
+      <div class="qq-group-tools">
         <button type="button" class="btn tiny" onclick="loadQqGroups()">刷新群列表</button>
-        <span class="muted tiny" id="qqGroupHint">正在读取…</span>
-      </span>
-      <input id="qqGroupSearch" placeholder="搜索群名或群号" oninput="renderQqGroups()"
-             style="max-width:620px">
+        <input id="qqGroupSearch" placeholder="搜索群名或群号" oninput="renderQqGroups()">
+      </div>
       <div id="qqGroupList" class="qq-group-list"></div>
       <input type="hidden" id="cfgConversations" value="${esc((values.selected_conversations || []).join(','))}">
       <span class="muted tiny">勾选你关心的群。群聊按天汇总：每个群每天只调用一次模型。</span>
-    </div>
+    </details>
     <div class="field">
       <span class="field-title">群聊摘要提示词</span>
       <textarea id="cfgPrompt" spellcheck="false" placeholder="例如：只保留通知、考试、报名、奖学金相关信息；摘要写成要点，标出截止时间。">${esc(values.prompt || '')}</textarea>
@@ -2650,6 +2660,12 @@ async function checkQqLogin() {
     image.style.display = 'none';
     loadQqGroups();
     return;
+  }
+  // Not logged in: the group list is meaningless until a scan finishes.
+  state.qqGroups = [];
+  const box = document.getElementById('qqGroupList');
+  if (box) {
+    box.innerHTML = '<div class="muted tiny" style="padding:10px">登录后自动加载群列表</div>';
   }
   status.textContent = '用手机 QQ 扫码登录（登录后这里会自动继续）';
   const token = encodeURIComponent(state.token || '');
