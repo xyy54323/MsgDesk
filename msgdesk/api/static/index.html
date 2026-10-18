@@ -2389,7 +2389,7 @@ function renderSources() {
   const container = document.getElementById('sourceList');
   document.getElementById('pageMeta').textContent = `${state.sources.length} 个来源`;
   const categories = Array.from(new Set(
-    state.sources.map(source => String(source.default_category || '').trim()).filter(Boolean)
+    state.sources.map(source => typeLabel(source.type || source.adapter_type))
   ));
   const filters = document.getElementById('sourceFilters');
   if (filters) {
@@ -2400,7 +2400,8 @@ function renderSources() {
       .join('');
   }
   const visible = state.sourceCategory
-    ? state.sources.filter(source => String(source.default_category || '') === state.sourceCategory)
+    ? state.sources.filter(source =>
+        typeLabel(source.type || source.adapter_type) === state.sourceCategory)
     : state.sources;
   if (!visible.length) {
     container.innerHTML = `
