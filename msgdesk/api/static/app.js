@@ -439,7 +439,7 @@ function clearFilters() {
 async function loadMessages(options = {}) {
   const silent = Boolean(options.silent);
   if (!silent) state.selected.clear();
-  const query = new URLSearchParams({ limit: '200' });
+  const query = new URLSearchParams({ limit: '1000' });
   if (state.filter === 'urgent') query.set('priority', 'urgent');
   if (state.filter === 'high') query.set('priority', 'high');
   if (state.filter === 'unread') query.set('unread', '1');

@@ -419,7 +419,7 @@ class Repository:
         if ignored_only:
             sql += "AND m.ignored_at IS NOT NULL "
         sql += "ORDER BY m.published_at DESC LIMIT ? OFFSET ?"
-        params.extend([min(limit, 200), offset])
+        params.extend([min(limit, 1000), offset])
         with self.db.connection() as conn:
             return [_decode_row(dict(r)) for r in conn.execute(sql, params)]
 
