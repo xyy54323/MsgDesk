@@ -13,3 +13,4 @@ dist/
 runtime/
 .venv/
 
+packaging/icon/preview-*.png
