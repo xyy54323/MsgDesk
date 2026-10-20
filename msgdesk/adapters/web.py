@@ -10,9 +10,17 @@ from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urldefrag, urljoin, urlsplit
 
+from ..errors import AppError
 from ..models import AdapterCapabilities, Cursor, FetchResult, RawMessage, ValidationResult
 from ..timeutil import has_explicit_time, iso_utc, parse_datetime
-from .base import BaseAdapter, FetchOptions, SourceContext
+from .base import BaseAdapter, FetchOptions, Fetcher, SourceContext, create_fetcher
+
+
+FETCH_BACKENDS = {"urllib", "scrapling_http"}
+
+
+def _normalize_fetch_backend(value: Any) -> str:
+    return str(value or "").strip().lower() or "urllib"
 
 
 class _PageParser(HTMLParser):
@@ -122,6 +130,31 @@ def _parse_page(body: bytes, url: str) -> _PageParser:
 class WebAdapter(BaseAdapter):
     adapter_type = "web"
 
+    def __init__(self, fetcher: Fetcher | None = None, **_: Any) -> None:
+        # The backend lives in source.config, which is only available when a
+        # source is fetched. Keep an injected fetcher as-is so existing test
+        # doubles and custom callers retain their behavior.
+        self.fetcher = fetcher
+        self._fetcher_backend: str | None = None
+
+    def _ensure_fetcher(self, config: dict[str, Any], timeout: float) -> None:
+        backend = _normalize_fetch_backend(config.get("fetch_backend"))
+        if backend not in FETCH_BACKENDS:
+            raise AppError(
+                "CONFIG_INVALID",
+                f"未知 fetch_backend: {config.get('fetch_backend')}",
+                {"fetch_backend": config.get("fetch_backend")},
+            )
+        if self._fetcher_backend is not None and backend != self._fetcher_backend:
+            raise AppError(
+                "CONFIG_INVALID",
+                f"WebAdapter 实例已使用 fetch_backend={self._fetcher_backend}，不能切换为 {backend}",
+                {"fetch_backend": backend},
+            )
+        if self.fetcher is None:
+            self.fetcher = create_fetcher(backend, timeout=timeout)
+            self._fetcher_backend = backend
+
     @staticmethod
     def _request_headers(config: dict[str, Any]) -> dict[str, str]:
         """Optional login cookie so members-only pages can be read."""
@@ -147,6 +180,19 @@ class WebAdapter(BaseAdapter):
         mode = str(config.get("mode") or "auto")
         if mode not in ("page", "list", "auto"):
             return ValidationResult(False, "mode 只能是 page、list 或 auto")
+        backend = _normalize_fetch_backend(config.get("fetch_backend"))
+        if backend not in FETCH_BACKENDS:
+            return ValidationResult(
+                False,
+                "fetch_backend 只能是 urllib 或 scrapling_http",
+                {"fetch_backend": config.get("fetch_backend")},
+            )
+        if backend == "scrapling_http" and url.startswith("file://"):
+            return ValidationResult(
+                False,
+                "scrapling_http 仅支持 http 或 https 地址",
+                {"fetch_backend": backend, "url": url},
+            )
         return ValidationResult(True, "配置有效")
 
     def fetch_incremental(
@@ -154,6 +200,7 @@ class WebAdapter(BaseAdapter):
     ) -> FetchResult:
         config = source.config
         url = str(config.get("url", "")).strip()
+        self._ensure_fetcher(config, options.timeout_seconds)
         mode = str(config.get("mode") or "auto").strip().lower()
         if mode not in ("page", "list"):
             mode = self._detect_mode(url, config, options)

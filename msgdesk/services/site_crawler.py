@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urldefrag, urljoin, urlsplit
 
-from ..adapters.base import HttpFetcher, SourceContext
+from ..adapters.base import Fetcher, SourceContext, create_fetcher
 from ..adapters.web import _parse_page
 from ..config import AppConfig
 from ..errors import AppError
@@ -49,6 +49,21 @@ class StaticListCollector:
         if not self.range_start:
             raise StaticListUnavailable("no global range")
 
+        fetcher = create_fetcher(
+            source.config.get("fetch_backend"), timeout=30.0
+        )
+        try:
+            return self._collect_pages(source, url, fetcher)
+        finally:
+            try:
+                fetcher.close()
+            except Exception:
+                # Resource cleanup must not replace the collection outcome.
+                pass
+
+    def _collect_pages(
+        self, source: SourceContext, url: str, fetcher: Fetcher
+    ) -> FetchResult:
         headers = {}
         cookie = str(source.config.get("cookie") or "").strip()
         if cookie and cookie != "***":
@@ -64,7 +79,7 @@ class StaticListCollector:
             if page_url in visited:
                 continue
             visited.add(page_url)
-            response = HttpFetcher().fetch(
+            response = fetcher.fetch(
                 page_url, timeout=30.0, headers=headers
             )
             parser = _parse_page(response.body, response.url or page_url)
@@ -89,7 +104,6 @@ class StaticListCollector:
 
         articles: list[dict[str, Any]] = []
         seen: set[str] = set()
-        fetcher = HttpFetcher()
         for target, date_text in entries:
             if target in seen:
                 continue
@@ -134,9 +148,9 @@ class StaticListCollector:
             kept = [
                 url for url in article["images"] if frequency[url] <= common_limit
             ]
-            image_lines = self._image_lines(kept, headers, date_text)
+            image_lines = self._image_lines(kept, headers, date_text, fetcher)
             file_lines = self._attachment_lines(
-                article["links"], target, headers, date_text
+                article["links"], target, headers, date_text, fetcher
             )
             if image_lines:
                 body += "\n\n" + "\n".join(image_lines)
@@ -166,11 +180,15 @@ class StaticListCollector:
         )
 
     def _image_lines(
-        self, images: list[str], headers: dict[str, str], date_text: str
+        self,
+        images: list[str],
+        headers: dict[str, str],
+        date_text: str,
+        fetcher: Fetcher,
     ) -> list[str]:
         lines: list[str] = []
         for index, remote in enumerate(images[:10]):
-            local = self._save_media(remote, headers, date_text, index)
+            local = self._save_media(remote, headers, date_text, index, fetcher)
             lines.append(f"![图片]({local or remote})")
         return lines
 
@@ -180,6 +198,7 @@ class StaticListCollector:
         base_url: str,
         headers: dict[str, str],
         date_text: str,
+        fetcher: Fetcher,
     ) -> list[str]:
         lines: list[str] = []
         seen: set[str] = set()
@@ -200,12 +219,19 @@ class StaticListCollector:
                 continue
             seen.add(target)
             name = label or Path(urlsplit(target).path).name or "附件"
-            local = self._save_attachment(target, name, headers, date_text)
+            local = self._save_attachment(
+                target, name, headers, date_text, fetcher
+            )
             lines.append(f"- [{name}]({local or target})")
         return lines
 
     def _save_media(
-        self, url: str, headers: dict[str, str], date_text: str, index: int
+        self,
+        url: str,
+        headers: dict[str, str],
+        date_text: str,
+        index: int,
+        fetcher: Fetcher,
     ) -> str:
         """Download an article image so it survives the WebVPN session."""
         suffix = Path(urlsplit(url).path).suffix.lower()
@@ -216,7 +242,7 @@ class StaticListCollector:
         for existing in root.glob(f"{digest}-{index}.*") if root.is_dir() else []:
             return f"/media/{date_text}/{existing.name}"
         try:
-            response = HttpFetcher().fetch(url, timeout=30.0, headers=headers)
+            response = fetcher.fetch(url, timeout=30.0, headers=headers)
         except AppError:
             return ""
         if (
@@ -234,7 +260,12 @@ class StaticListCollector:
         return f"/media/{date_text}/{name}"
 
     def _save_attachment(
-        self, url: str, label: str, headers: dict[str, str], date_text: str
+        self,
+        url: str,
+        label: str,
+        headers: dict[str, str],
+        date_text: str,
+        fetcher: Fetcher,
     ) -> str:
         """Download an article attachment so the link is always clickable."""
         suffix = Path(label).suffix or Path(urlsplit(url).path).suffix or ".bin"
@@ -243,7 +274,7 @@ class StaticListCollector:
         for existing in root.glob(f"{digest}-*") if root.is_dir() else []:
             return f"/attachments/{date_text}/{existing.name}"
         try:
-            response = HttpFetcher().fetch(url, timeout=60.0, headers=headers)
+            response = fetcher.fetch(url, timeout=60.0, headers=headers)
         except AppError:
             return ""
         if not response.body or _looks_truncated(response) or _is_html_page(response):

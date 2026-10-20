@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..adapters import create_adapter, list_adapter_capabilities
-from ..adapters.base import SourceContext
+from ..adapters.base import SourceContext, create_fetcher
 from .. import __version__
 from ..config import (
     ModelProviderConfig,
@@ -437,7 +437,6 @@ class ApiRouter:
                             "status": {"status": "ready"},
                         }
                     if source["adapter_type"] in ("web", "ai_web") and validation.ok:
-                        from ..adapters.base import HttpFetcher
                         from ..adapters.web import _parse_page
 
                         target = str(source_config.get("url") or "").strip()
@@ -447,8 +446,12 @@ class ApiRouter:
                             if cookie and cookie != "***"
                             else None
                         )
+                        fetcher = None
                         try:
-                            response = HttpFetcher().fetch(
+                            fetcher = create_fetcher(
+                                source_config.get("fetch_backend"), timeout=30.0
+                            )
+                            response = fetcher.fetch(
                                 target, timeout=30.0, headers=headers
                             )
                             parser = _parse_page(response.body, response.url or target)
@@ -458,6 +461,21 @@ class ApiRouter:
                                 "capabilities": adapter.get_capabilities().to_dict(),
                                 "status": {"status": "error"},
                             }
+                        except Exception:
+                            return 200, {
+                                "validation": {
+                                    "ok": False,
+                                    "message": "网站连接测试失败，请检查网络或抓取依赖",
+                                },
+                                "capabilities": adapter.get_capabilities().to_dict(),
+                                "status": {"status": "error"},
+                            }
+                        finally:
+                            if fetcher is not None:
+                                try:
+                                    fetcher.close()
+                                except Exception:
+                                    pass
                         title = " ".join(parser.title_parts).strip()
                         body_text = "\n".join(parser.paragraphs)
                         needs_login = len(body_text) < 300 and "登录" in (

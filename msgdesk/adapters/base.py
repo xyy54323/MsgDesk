@@ -35,7 +35,10 @@ class Fetcher(Protocol):
         etag: str | None = None,
         last_modified: str | None = None,
         timeout: float = 20.0,
+        headers: dict[str, str] | None = None,
     ) -> FetchResponse: ...
+
+    def close(self) -> None: ...
 
 
 class HttpFetcher:
@@ -84,6 +87,24 @@ class HttpFetcher:
             raise AppError("NETWORK_TIMEOUT", f"请求超时: {url}") from exc
         except urllib.error.URLError as exc:
             raise AppError("NETWORK_UNAVAILABLE", f"网络不可用: {url}") from exc
+
+    def close(self) -> None:
+        return None
+
+
+def create_fetcher(fetch_backend: str | None = "urllib", **kwargs: Any) -> Fetcher:
+    backend = (fetch_backend or "").strip().lower() or "urllib"
+    if backend == "urllib":
+        return HttpFetcher(**kwargs)
+    if backend == "scrapling_http":
+        from .scrapling_http import ScraplingHttpFetcher
+
+        return ScraplingHttpFetcher(**kwargs)
+    raise AppError(
+        "CONFIG_INVALID",
+        f"未知 fetch_backend: {fetch_backend}",
+        {"fetch_backend": fetch_backend},
+    )
 
 
 @dataclass
@@ -137,5 +158,7 @@ class BaseAdapter:
         return ConnectionStatus(status="ready", adapter_version=self.adapter_version)
 
     def close(self) -> None:
-        return None
+        close = getattr(self.fetcher, "close", None)
+        if callable(close):
+            close()
 
