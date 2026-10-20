@@ -147,15 +147,9 @@ class SyncService:
                         )
                         if existing is not None:
                             old_content = str(existing.get("content_text") or "")
-                            new_refs = _local_media_refs(text)
-                            old_refs = _local_media_refs(old_content)
                             if (
                                 source_row["type"] in ("web", "ai_web")
                                 and text != old_content
-                                and (
-                                    new_refs - old_refs
-                                    or self._has_missing_media(old_refs)
-                                )
                             ):
                                 conn.execute(
                                     "UPDATE messages SET content_text = ?, "
@@ -391,14 +385,6 @@ class SyncService:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _has_missing_media(self, refs: set[str]) -> bool:
-        """True when a stored message points at files that no longer exist."""
-        for ref in refs:
-            relative = ref.split("?", 1)[0].lstrip("/")
-            if not (self.config.data_dir / relative).exists():
-                return True
-        return False
-
     def _download_attachments(
         self,
         raw: Any,
@@ -470,13 +456,7 @@ class SyncService:
         return path
 
 
-_MEDIA_REF_RE = re.compile(r"/(?:media|attachments)/[^\s)\"'<>]+")
 _CACHE_KEY_RE = re.compile(r"^[0-9a-f]{16,64}$")
-
-
-def _local_media_refs(text: str) -> set[str]:
-    """Return the local media paths referenced by a message body."""
-    return set(_MEDIA_REF_RE.findall(text or ""))
 
 
 def _qq_tencent_roots() -> list[Path]:
