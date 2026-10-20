@@ -8,19 +8,28 @@ model step/item budget.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import date, datetime, time
+from pathlib import Path
 from typing import Any
-from urllib.parse import urldefrag, urljoin
+from urllib.parse import urldefrag, urljoin, urlsplit
 
 from ..adapters.base import HttpFetcher, SourceContext
 from ..adapters.web import _parse_page
 from ..config import AppConfig
+from ..errors import AppError
 from ..models import Cursor, FetchResult, RawMessage
 from ..timeutil import iso_utc, local_zone
 
 DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
 MAX_PAGES = 100
+MAX_MEDIA_BYTES = 8 * 1024 * 1024
+FILE_SUFFIXES = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".zip", ".rar", ".7z", ".csv", ".txt", ".md",
+}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 
 class StaticListUnavailable(Exception):
@@ -80,16 +89,24 @@ class StaticListCollector:
 
         messages: list[RawMessage] = []
         seen: set[str] = set()
+        fetcher = HttpFetcher()
         for target, date_text in entries:
             if target in seen:
                 continue
             seen.add(target)
-            response = HttpFetcher().fetch(target, timeout=30.0, headers=headers)
+            response = fetcher.fetch(target, timeout=30.0, headers=headers)
             parser = _parse_page(response.body, response.url or target)
             title = " ".join(parser.title_parts).strip()
             body = "\n\n".join(parser.paragraphs).strip() or parser.description.strip()
             if not title or not body:
                 continue
+            article_base = response.url or target
+            image_lines = self._image_lines(parser, article_base, headers, date_text)
+            file_lines = self._attachment_lines(parser, article_base, headers, date_text)
+            if image_lines:
+                body += "\n\n" + "\n".join(image_lines)
+            if file_lines:
+                body += "\n\n## 附件\n\n" + "\n".join(file_lines)
             published_at = datetime.combine(
                 date.fromisoformat(date_text), time.min, self.zone
             )
@@ -111,6 +128,86 @@ class StaticListCollector:
             next_cursor=Cursor(cursor_type="static_list", cursor_value=iso_utc()),
             stats={"fetched": len(messages), "skipped": 0, "failed": 0},
         )
+
+    def _image_lines(
+        self, parser: Any, base_url: str, headers: dict[str, str], date_text: str
+    ) -> list[str]:
+        lines: list[str] = []
+        for index, src in enumerate(parser.images[:10]):
+            remote = urljoin(base_url, src)
+            local = self._save_media(remote, headers, date_text, index)
+            lines.append(f"![图片]({local or remote})")
+        return lines
+
+    def _attachment_lines(
+        self, parser: Any, base_url: str, headers: dict[str, str], date_text: str
+    ) -> list[str]:
+        lines: list[str] = []
+        seen: set[str] = set()
+        for href, text in parser.links:
+            target = urldefrag(urljoin(base_url, href))[0]
+            suffix = Path(urlsplit(target).path).suffix.lower()
+            label = text.strip()
+            if suffix not in FILE_SUFFIXES and not any(
+                suffix in label.lower() for suffix in FILE_SUFFIXES
+            ):
+                continue
+            if target in seen:
+                continue
+            seen.add(target)
+            name = label or Path(urlsplit(target).path).name or "附件"
+            local = self._save_attachment(target, name, headers, date_text)
+            lines.append(f"- [{name}]({local or target})")
+        return lines
+
+    def _save_media(
+        self, url: str, headers: dict[str, str], date_text: str, index: int
+    ) -> str:
+        """Download an article image so it survives the WebVPN session."""
+        suffix = Path(urlsplit(url).path).suffix.lower()
+        if suffix not in _IMAGE_SUFFIXES:
+            suffix = ""
+        digest = hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+        root = Path(self.config.data_dir) / "media" / date_text
+        for existing in root.glob(f"{digest}-{index}.*") if root.is_dir() else []:
+            return f"/media/{date_text}/{existing.name}"
+        try:
+            response = HttpFetcher().fetch(url, timeout=30.0, headers=headers)
+        except AppError:
+            return ""
+        if (
+            not response.body
+            or _looks_truncated(response)
+            or not _is_image(response)
+        ):
+            return ""
+        if suffix not in _IMAGE_SUFFIXES:
+            suffix = _image_suffix(response.headers.get("content-type", "")) or ".png"
+        root.mkdir(parents=True, exist_ok=True)
+        name = f"{digest}-{index}{suffix}"
+        (root / name).write_bytes(response.body)
+        return f"/media/{date_text}/{name}"
+
+    def _save_attachment(
+        self, url: str, label: str, headers: dict[str, str], date_text: str
+    ) -> str:
+        """Download an article attachment so the link is always clickable."""
+        suffix = Path(label).suffix or Path(urlsplit(url).path).suffix or ".bin"
+        digest = hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+        root = Path(self.config.data_dir) / "attachments" / date_text
+        for existing in root.glob(f"{digest}-*") if root.is_dir() else []:
+            return f"/attachments/{date_text}/{existing.name}"
+        try:
+            response = HttpFetcher().fetch(url, timeout=60.0, headers=headers)
+        except AppError:
+            return ""
+        if not response.body or _looks_truncated(response) or _is_html_page(response):
+            return ""
+        safe = re.sub(r"[^\w.\-]+", "_", Path(label).stem)[:40] or "attachment"
+        root.mkdir(parents=True, exist_ok=True)
+        name = f"{digest}-{safe}{suffix}"
+        (root / name).write_bytes(response.body)
+        return f"/attachments/{date_text}/{name}"
 
     @staticmethod
     def _dated_entries(parser: Any) -> list[tuple[str, str]]:
@@ -162,3 +259,45 @@ class StaticListCollector:
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", "", value).replace("…", "").replace("...", "")
+
+
+def _looks_truncated(response: Any) -> bool:
+    if len(response.body) >= MAX_MEDIA_BYTES:
+        return True
+    length = str(response.headers.get("content-length") or "").strip()
+    if not length.isdigit():
+        return False
+    return int(length) > len(response.body)
+
+
+def _image_suffix(content_type: str) -> str:
+    value = content_type.split(";", 1)[0].strip().lower()
+    return {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+    }.get(value, "")
+
+
+def _is_html_page(response: Any) -> bool:
+    """Some CMS attachment links return a captcha page instead of the file."""
+    content_type = str(response.headers.get("content-type", "")).lower()
+    if "text/html" in content_type:
+        return True
+    head = response.body[:256].lstrip().lower()
+    return head.startswith(b"<!doctype html") or head.startswith(b"<html")
+
+
+def _is_image(response: Any) -> bool:
+    content_type = str(response.headers.get("content-type", "")).lower()
+    if content_type.startswith("image/"):
+        return True
+    head = response.body[:12]
+    return (
+        head.startswith(b"\x89PNG")
+        or head.startswith(b"\xff\xd8\xff")
+        or head.startswith(b"GIF8")
+        or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+    )

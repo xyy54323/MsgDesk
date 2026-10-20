@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -145,6 +146,19 @@ class SyncService:
                             conn, source_id, conversation_id, raw.platform_message_id
                         )
                         if existing is not None:
+                            old_content = str(existing.get("content_text") or "")
+                            if (
+                                source_row["type"] in ("web", "ai_web")
+                                and text != old_content
+                                and _local_media_refs(text) - _local_media_refs(old_content)
+                            ):
+                                self.repo.update_message_fields(
+                                    existing["id"],
+                                    {
+                                        "content_text": text,
+                                        "content_hash": content_hash(text),
+                                    },
+                                )
                             stats["duplicated"] += 1
                             continue
                     digest = content_hash(text)
@@ -309,6 +323,7 @@ class SyncService:
                     payload,
                     str(message.get("conversation_id") or ""),
                     source,
+                    refresh_images=True,
                 )
                 if converted is None or not converted.attachments:
                     continue
@@ -389,21 +404,34 @@ class SyncService:
             url = str(entry.get("url") or "").strip()
             name = str(entry.get("name") or "").strip()
             kind = str(entry.get("type") or "").strip()
-            if not url.startswith(("http://", "https://")):
+            cache_key = str(entry.get("cache_key") or "").strip()
+            cached_image = (
+                _find_qq_cached_image(cache_key) if kind == "image" and cache_key else None
+            )
+            if not url.startswith(("http://", "https://")) and cached_image is None:
                 continue
             if not name:
                 name = Path(url.split("?", 1)[0]).name or "attachment"
-            request = urllib.request.Request(
-                url, headers={"User-Agent": "MsgDesk/0.1"}
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    body = response.read(50 * 1024 * 1024 + 1)
-            except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-                warnings.append(f"附件下载失败 {name}: {type(exc).__name__}")
-                continue
+            body = b""
+            if url.startswith(("http://", "https://")):
+                request = urllib.request.Request(
+                    url, headers={"User-Agent": "MsgDesk/0.1"}
+                )
+                try:
+                    with urllib.request.urlopen(request, timeout=30) as response:
+                        body = response.read(50 * 1024 * 1024 + 1)
+                except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+                    warnings.append(f"附件下载失败 {name}: {type(exc).__name__}")
+            if not body and cached_image is not None:
+                try:
+                    body = cached_image.read_bytes()
+                    name = cached_image.name
+                except OSError:
+                    body = b""
             if len(body) > 50 * 1024 * 1024:
                 warnings.append(f"附件过大，已跳过 {name}")
+                continue
+            if not body:
                 continue
             safe_name = re.sub(r"[^\w.\-]+", "_", Path(name).name) or "attachment.bin"
             if not Path(safe_name).suffix:
@@ -429,4 +457,58 @@ class SyncService:
         )
         temp.replace(path)
         return path
+
+
+_MEDIA_REF_RE = re.compile(r"/(?:media|attachments)/[^\s)\"'<>]+")
+_CACHE_KEY_RE = re.compile(r"^[0-9a-f]{16,64}$")
+
+
+def _local_media_refs(text: str) -> set[str]:
+    """Return the local media paths referenced by a message body."""
+    return set(_MEDIA_REF_RE.findall(text or ""))
+
+
+def _qq_tencent_roots() -> list[Path]:
+    """Return QQ's data directories that may hold cached images."""
+    roots: list[Path] = []
+    home_docs = Path.home() / "Documents" / "Tencent Files"
+    if home_docs.is_dir():
+        roots.append(home_docs)
+    public = Path(os.environ.get("PUBLIC") or r"C:\Users\Public")
+    ini = public / "Documents" / "Tencent" / "QQ" / "UserDataInfo.ini"
+    try:
+        match = re.search(
+            r"^\s*UserDataSavePath\s*=\s*(.+?)\s*$",
+            ini.read_text(encoding="utf-8", errors="ignore"),
+            re.M,
+        )
+    except OSError:
+        match = None
+    if match:
+        candidate = Path(match.group(1).strip())
+        if candidate.is_dir() and candidate not in roots:
+            roots.append(candidate)
+    return roots
+
+
+def _find_qq_cached_image(cache_key: str) -> Path | None:
+    """Find an image in QQ's local picture cache by its file hash."""
+    key = cache_key.strip().lower()
+    if not _CACHE_KEY_RE.match(key):
+        return None
+    for root in _qq_tencent_roots():
+        for pic in root.glob("*/nt_qq/nt_data/Pic"):
+            for month in pic.iterdir() if pic.is_dir() else []:
+                for folder in ("Ori", "Thumb"):
+                    directory = month / folder
+                    if not directory.is_dir():
+                        continue
+                    for pattern in (f"{key}.*", f"{key}_*"):
+                        for hit in directory.glob(pattern):
+                            try:
+                                if hit.is_file() and hit.stat().st_size > 0:
+                                    return hit
+                            except OSError:
+                                continue
+    return None
 

@@ -6,6 +6,7 @@ import json
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from ..errors import AppError
@@ -476,6 +477,7 @@ class QQOneBotAdapter(BaseAdapter):
         item: dict[str, Any],
         fallback_conversation: str,
         source: SourceContext | None = None,
+        refresh_images: bool = False,
     ) -> RawMessage | None:
         message_type = str(item.get("message_type") or "group")
         group_id = item.get("group_id")
@@ -507,10 +509,15 @@ class QQOneBotAdapter(BaseAdapter):
                     text_parts.append(str(data.get("text") or ""))
                 elif segment_type == "image":
                     text_parts.append("[图片]")
+                    image_url = str(data.get("url") or "").strip()
+                    file_name = str(data.get("file") or "").strip()
+                    if source is not None and (refresh_images or not image_url):
+                        image_url = self._resolve_image_url(source, data) or image_url
                     attachments.append(
                         {
                             "type": "image",
-                            "url": data.get("url") or data.get("file"),
+                            "url": image_url or None,
+                            "cache_key": Path(file_name).stem.lower() if file_name else "",
                         }
                     )
                 elif segment_type == "file":
@@ -563,6 +570,24 @@ class QQOneBotAdapter(BaseAdapter):
             attachments=[a for a in attachments if a.get("url") or a.get("name")],
             raw_payload={"platform": "qq", **item},
         )
+
+    def _resolve_image_url(
+        self, source: SourceContext, data: dict[str, Any]
+    ) -> str:
+        """Refresh a QQ image URL from the local NapCat client."""
+        file_name = str(data.get("file") or "").strip()
+        if not file_name:
+            return ""
+        try:
+            payload = self._call(source, "get_image", {"file": file_name})
+        except AppError:
+            return ""
+        result = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if isinstance(result, dict):
+            value = str(result.get("url") or result.get("file") or "").strip()
+            if value.startswith(("http://", "https://")):
+                return value
+        return ""
 
     def _resolve_file_url(
         self,
