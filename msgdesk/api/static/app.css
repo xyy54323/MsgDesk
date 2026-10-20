@@ -429,6 +429,9 @@
     box-sizing: border-box; width: 132px; height: 32px;
     padding: 0 8px; font-size: 12px;
   }
+  .config-divider {
+    height: 1px; margin: 14px 0 0; background: #C9C1AD;
+  }
   .qq-dropdown {
     display: none; position: absolute; left: 0; right: 0; top: 36px; z-index: 30;
     max-height: 220px; overflow: auto;
