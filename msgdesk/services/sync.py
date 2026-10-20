@@ -146,7 +146,7 @@ class SyncService:
                             conn, source_id, conversation_id, raw.platform_message_id
                         )
                         if existing is not None:
-                            old_content = str(existing.get("content_text") or "")
+                            old_content = str(existing["content_text"] or "")
                             if (
                                 source_row["type"] in ("web", "ai_web")
                                 and text != old_content
@@ -242,8 +242,9 @@ class SyncService:
                             conn=conn,
                         )
                     stats["inserted"] += 1
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - keep one bad item local
                     stats["failed"] += 1
+                    warnings.append(f"消息处理失败: {type(exc).__name__}")
             for conversation_id, date_text in sorted(qq_slices):
                 if self.repo.open_job_exists(
                     "summarize_conversation",
