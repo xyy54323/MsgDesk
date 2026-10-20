@@ -109,35 +109,16 @@ python -m compileall -q msgdesk
 
 当前基线为 45 项单元测试。
 
-## 构建与发布
-
-Windows 安装包通过 GitHub Actions 构建，不在本机构建。
-
-在仓库 Actions 页面选择 **Build Windows Package** → **Run workflow**，按需填写以下参数：
-
-| 参数 | 说明 | 默认值 |
-| --- | --- | --- |
-| `version` | 安装包版本号，格式为 `x.y.z` | `0.2.0` |
-| `bundle_napcat` | 是否内置 QQ 桥接 NapCat（约 345MB） | `true` |
-| `with_browser` | 是否内置网站登录用 Chromium（约 150MB） | `false` |
-| `publish_release` | 构建成功后发布 GitHub Release | `false` |
-
-工作流依次执行单元测试、打包、打包后烟雾测试、产物安全检查与安装包生成，并上传 `MsgDesk-Setup-<版本>.exe` 与 `MsgDesk-win64.zip` 两个附件。启用 `publish_release` 时，将自动创建 `v<版本>` 标签并发布 Release。
-
 ## 隐私与安全
 
 - 系统只读采集，不包含任何发送、回复或社交操作接口。
 - 本地服务默认仅监听 `127.0.0.1`，不对局域网开放。
-- 构建工作流会校验产物中不包含 `config.json`、`data/`、`digests/`。
 - 模型 API Key 与登录 Cookie 以明文保存在本机 `config.json`，请勿将该文件或程序数据目录外传。
-
-## 已知限制
-
-- QQ 历史图片的原始链接会过期；本机缓存缺失时无法恢复，消息中会明确标注。
-- 部分校内网附件通过带图形验证码的下载页提供，需在浏览器中手动完成。
-- 定时采集与日报生成依赖应用保持运行，关闭应用后不会执行。
-- 当前版本仅支持网站与 QQ 来源，微信、企业微信与 RSS 尚未纳入范围。
 
 ## 版本
 
 当前版本：`0.2.0`（标签 `v0.2.0`）。
+
+## 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。
