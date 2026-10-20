@@ -418,9 +418,12 @@
     padding: 0 9px; line-height: 28px; font-size: 12px;
   }
   .date-row .btn {
-    box-sizing: border-box; height: 32px; min-height: 32px;
-    padding: 0 10px; font-size: 12px; line-height: 28px;
+    box-sizing: border-box; width: 48px; height: 32px; min-height: 32px;
+    padding: 0; font-size: 12px; line-height: 28px;
+    /* No offset shadow here: the drawn box is exactly the clickable area. */
+    box-shadow: none;
   }
+  .date-row .btn:active { transform: none; box-shadow: none; }
   .qq-dropdown {
     display: none; position: absolute; left: 0; right: 0; top: 36px; z-index: 30;
     max-height: 220px; overflow: auto;
