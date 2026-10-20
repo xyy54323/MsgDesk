@@ -252,8 +252,18 @@ def cmd_serve(
             height=920,
             min_size=(1100, 700),
         )
+        icon_path = None
+        if not getattr(sys, "frozen", False):
+            candidate = (
+                Path(__file__).resolve().parent.parent
+                / "packaging"
+                / "icon"
+                / "MsgDesk.ico"
+            )
+            if candidate.is_file():
+                icon_path = str(candidate)
         try:
-            webview.start()
+            webview.start(icon=icon_path)
         finally:
             runtime.stop()
             server.shutdown()

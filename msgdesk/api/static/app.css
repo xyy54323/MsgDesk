@@ -39,9 +39,8 @@
   }
   .brand { display: flex; align-items: center; gap: 10px; padding: 2px 4px 22px; }
   .brand-mark {
-    width: 34px; height: 34px; display: grid; place-items: center;
-    background: var(--olive); color: #151911; border: 2px solid #0E120D;
-    box-shadow: 3px 3px 0 #0E120D; font-size: 18px;
+    width: 34px; height: 34px; display: block; object-fit: contain;
+    border: 2px solid #0E120D; box-shadow: 3px 3px 0 #0E120D;
   }
   .brand-name {
     font: 700 17px/1 "Cascadia Mono", Consolas, monospace;
