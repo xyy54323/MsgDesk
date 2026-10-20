@@ -87,7 +87,7 @@ class StaticListCollector:
         if not found_dates:
             raise StaticListUnavailable("no dated list entries")
 
-        messages: list[RawMessage] = []
+        articles: list[dict[str, Any]] = []
         seen: set[str] = set()
         fetcher = HttpFetcher()
         for target, date_text in entries:
@@ -101,8 +101,43 @@ class StaticListCollector:
             if not title or not body:
                 continue
             article_base = response.url or target
-            image_lines = self._image_lines(parser, article_base, headers, date_text)
-            file_lines = self._attachment_lines(parser, article_base, headers, date_text)
+            images: list[str] = []
+            for src in parser.images:
+                image_url = urljoin(article_base, src)
+                if image_url not in images:
+                    images.append(image_url)
+            articles.append(
+                {
+                    "target": target,
+                    "date": date_text,
+                    "title": title,
+                    "body": body,
+                    "images": images,
+                    "links": list(parser.links),
+                }
+            )
+
+        # Images shared by many articles are site chrome (logo, banners), not
+        # article content, so drop anything that shows up across pages.
+        frequency: dict[str, int] = {}
+        for article in articles:
+            for image_url in article["images"]:
+                frequency[image_url] = frequency.get(image_url, 0) + 1
+        common_limit = max(2, len(articles) // 4)
+
+        messages: list[RawMessage] = []
+        for article in articles:
+            target = article["target"]
+            date_text = article["date"]
+            title = article["title"]
+            body = article["body"]
+            kept = [
+                url for url in article["images"] if frequency[url] <= common_limit
+            ]
+            image_lines = self._image_lines(kept, headers, date_text)
+            file_lines = self._attachment_lines(
+                article["links"], target, headers, date_text
+            )
             if image_lines:
                 body += "\n\n" + "\n".join(image_lines)
             if file_lines:
@@ -130,26 +165,34 @@ class StaticListCollector:
         )
 
     def _image_lines(
-        self, parser: Any, base_url: str, headers: dict[str, str], date_text: str
+        self, images: list[str], headers: dict[str, str], date_text: str
     ) -> list[str]:
         lines: list[str] = []
-        for index, src in enumerate(parser.images[:10]):
-            remote = urljoin(base_url, src)
+        for index, remote in enumerate(images[:10]):
             local = self._save_media(remote, headers, date_text, index)
             lines.append(f"![图片]({local or remote})")
         return lines
 
     def _attachment_lines(
-        self, parser: Any, base_url: str, headers: dict[str, str], date_text: str
+        self,
+        links: list[tuple[str, str]],
+        base_url: str,
+        headers: dict[str, str],
+        date_text: str,
     ) -> list[str]:
         lines: list[str] = []
         seen: set[str] = set()
-        for href, text in parser.links:
+        for href, text in links:
             target = urldefrag(urljoin(base_url, href))[0]
             suffix = Path(urlsplit(target).path).suffix.lower()
             label = text.strip()
-            if suffix not in FILE_SUFFIXES and not any(
-                suffix in label.lower() for suffix in FILE_SUFFIXES
+            is_download_link = (
+                "download.jsp" in target or "DownloadAttachUrl" in target
+            )
+            if (
+                not is_download_link
+                and suffix not in FILE_SUFFIXES
+                and not any(suffix in label.lower() for suffix in FILE_SUFFIXES)
             ):
                 continue
             if target in seen:
@@ -179,6 +222,7 @@ class StaticListCollector:
             not response.body
             or _looks_truncated(response)
             or not _is_image(response)
+            or len(response.body) < 1024
         ):
             return ""
         if suffix not in _IMAGE_SUFFIXES:

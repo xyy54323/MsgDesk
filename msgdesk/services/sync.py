@@ -147,17 +147,20 @@ class SyncService:
                         )
                         if existing is not None:
                             old_content = str(existing.get("content_text") or "")
+                            new_refs = _local_media_refs(text)
+                            old_refs = _local_media_refs(old_content)
                             if (
                                 source_row["type"] in ("web", "ai_web")
                                 and text != old_content
-                                and _local_media_refs(text) - _local_media_refs(old_content)
+                                and (
+                                    new_refs - old_refs
+                                    or self._has_missing_media(old_refs)
+                                )
                             ):
-                                self.repo.update_message_fields(
-                                    existing["id"],
-                                    {
-                                        "content_text": text,
-                                        "content_hash": content_hash(text),
-                                    },
+                                conn.execute(
+                                    "UPDATE messages SET content_text = ?, "
+                                    "content_hash = ?, updated_at = ? WHERE id = ?",
+                                    (text, content_hash(text), now, existing["id"]),
                                 )
                             stats["duplicated"] += 1
                             continue
@@ -387,6 +390,14 @@ class SyncService:
         path = self.config.data_dir / "raw" / now.strftime("%Y") / now.strftime("%m") / now.strftime("%d")
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def _has_missing_media(self, refs: set[str]) -> bool:
+        """True when a stored message points at files that no longer exist."""
+        for ref in refs:
+            relative = ref.split("?", 1)[0].lstrip("/")
+            if not (self.config.data_dir / relative).exists():
+                return True
+        return False
 
     def _download_attachments(
         self,
