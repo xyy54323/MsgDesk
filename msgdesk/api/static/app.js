@@ -397,20 +397,27 @@ function showView(view) {
   history.replaceState(null, '', '#' + next);
   renderTopActions();
   if (next === 'messages') loadMessages();
-  if (next === 'sources') loadSources();
+  if (next === 'sources') {
+    // Entering the section always starts from the list, never a stale editor.
+    if (document.getElementById('sourceEditor')?.classList.contains('active')) {
+      closeSourceEditor();
+    }
+    loadSources();
+  }
   if (next === 'basic') loadRange();
-  if (next === 'model') loadModel();
+  if (next === 'model') {
+    if (document.getElementById('modelEditor')?.classList.contains('active')) {
+      closeModelEditor();
+    }
+    loadModel();
+  }
   if (next === 'profile') loadProfile();
   saveUiState();
 }
 
 function saveUiState() {
   try {
-    sessionStorage.setItem('msgdesk_ui', JSON.stringify({
-      view: state.view,
-      source: state.sourceEditingId || '',
-      model: state.modelEditingId || ''
-    }));
+    sessionStorage.setItem('msgdesk_ui', JSON.stringify({ view: state.view }));
   } catch (error) {}
 }
 
@@ -2422,14 +2429,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     ? hashView
     : (saved && VIEWS.includes(saved.view) ? saved.view : 'messages');
   showView(initial);
-  if (saved && saved.view === initial) {
-    if (initial === 'sources' && saved.source) {
-      openSourceEditor(saved.source);
-    } else if (initial === 'model' && saved.model) {
-      await loadModel();
-      openModelEditor(saved.model);
-    }
-  }
   setInterval(async () => {
     if (document.hidden) return;
     await refreshStatus();
