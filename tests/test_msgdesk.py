@@ -185,6 +185,20 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(result["merged"], 1)
             self.assertEqual(len(repo.list_messages(limit=100)), 1)
 
+    def test_unprocessed_messages_use_source_default_category(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            repo = build_repo(root)
+            source = create_web_source(repo)
+            repo.update_source(source["id"], {"default_category": "研究生通知"})
+            fetcher = FakeFetcher({PAGE_URL: (FIXTURES / "page.html").read_bytes()})
+            SyncService(
+                config, repo, adapter_factory=lambda _: WebAdapter(fetcher=fetcher)
+            ).sync_source(source["id"])
+            message = repo.list_messages(limit=1)[0]
+            self.assertEqual(message["category"], "研究生通知")
+
 
 class ProcessingTests(unittest.TestCase):
     def _seed(self, root: Path, config: AppConfig, repo: Repository) -> dict:

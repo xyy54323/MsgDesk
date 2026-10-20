@@ -367,7 +367,8 @@ class Repository:
     ) -> list[dict[str, Any]]:
         sql = (
             "SELECT m.*, s.name AS source_name, s.type AS source_type, "
-            "c.name AS conversation_name, p.category, p.priority, p.urgency, "
+            "c.name AS conversation_name, COALESCE(p.category, s.default_category) AS category, "
+            "p.priority, p.urgency, "
             "p.summary_short, p.deadline_at, p.status AS processing_result "
             "FROM messages m JOIN sources s ON s.id = m.source_id "
             "LEFT JOIN conversations c ON c.id = m.conversation_id "
@@ -382,7 +383,7 @@ class Repository:
             sql += "AND m.processing_status = ? "
             params.append(status)
         if category:
-            sql += "AND p.category = ? "
+            sql += "AND COALESCE(p.category, s.default_category) = ? "
             params.append(category)
         if date_text:
             from .timeutil import local_day_bounds
@@ -429,7 +430,8 @@ class Repository:
         with self.db.connection() as conn:
             rows = conn.execute(
                 "SELECT m.*, s.name AS source_name, s.type AS source_type, "
-                "c.name AS conversation_name, p.category, p.priority, p.urgency, "
+                "c.name AS conversation_name, COALESCE(p.category, s.default_category) AS category, "
+                "p.priority, p.urgency, "
                 "p.summary_short, p.summary_long, p.tags_json, p.action_items_json, "
                 "p.deadline_at, p.facts_json, p.status AS processing_result, "
                 "p.confidence, p.model_name "

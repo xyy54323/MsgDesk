@@ -129,7 +129,7 @@ F:\env\python\python.exe -m unittest discover -s tests -t .
 F:\env\python\python.exe -m compileall -q msgdesk
 ```
 
-当前基线为 43 项单元测试。
+当前基线为 44 项单元测试。
 
 ## 边界
 
