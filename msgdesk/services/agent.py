@@ -26,8 +26,8 @@ from ..models import Cursor, FetchResult, RawMessage
 from ..timeutil import iso_utc, local_zone, parse_datetime
 from .profile_prompt import profile_prompt
 
-MAX_STEPS = 30
-MAX_ITEMS = 30
+MAX_STEPS = 18
+MAX_ITEMS = 18
 PAGE_CHAR_LIMIT = 6000
 LINK_LIMIT = 60
 
