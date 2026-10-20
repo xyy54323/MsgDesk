@@ -76,4 +76,7 @@ class ConversationDigestService:
             summary_md=summary,
             model_name=str(getattr(self.config.model, "model", "") or ""),
         )
+        # Group chats are handled as one digest, so their messages never go
+        # through per-message processing; mark them done once the summary lands.
+        self.repo.mark_messages_processed([item.get("id") for item in messages])
         return {"messages": len(messages), "summary": summary}

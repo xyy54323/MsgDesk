@@ -476,6 +476,19 @@ class Repository:
             ).fetchall()
             return [_decode_row(dict(r)) for r in rows]
 
+    def mark_messages_processed(self, message_ids: list[str]) -> int:
+        """Mark group-chat messages as handled by their conversation digest."""
+        ids = [value for value in message_ids if value]
+        if not ids:
+            return 0
+        marks = ",".join("?" * len(ids))
+        with self.db.connection() as conn:
+            return conn.execute(
+                "UPDATE messages SET processing_status = 'processed', updated_at = ? "
+                f"WHERE id IN ({marks}) AND processing_status != 'processed'",
+                [iso_utc(), *ids],
+            ).rowcount
+
     def upsert_conversation_digest(
         self, *, source_id: str, conversation_id: str, conversation_name: str,
         date_text: str, message_count: int, summary_md: str, model_name: str,

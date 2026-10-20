@@ -1,9 +1,11 @@
 import json
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from msgdesk.models import FetchResult, RawMessage, ValidationResult
+from msgdesk.services.conversation_digest import ConversationDigestService
 from msgdesk.services.digest import DigestService
 from msgdesk.services.sync import SyncService
 from tests.test_msgdesk import build_config, build_repo
@@ -129,6 +131,34 @@ class QqDigestFlowTests(unittest.TestCase):
             self.assertEqual(service.generate_missing(), 1)
             digests = repo.list_digests(10)
             self.assertEqual([item["date"] for item in digests], ["2026-10-18"])
+
+    def test_group_summary_marks_messages_processed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            repo = build_repo(root)
+            source = qq_source(repo)
+            messages = [
+                raw("g1", "群一", "1", "通知一"),
+                raw("g1", "群一", "2", "通知二"),
+            ]
+            SyncService(config, repo, adapter_factory=lambda _: FakeQQAdapter(messages)).sync_source(
+                source["id"]
+            )
+            ids = conversation_ids(repo)
+            with mock.patch(
+                "msgdesk.services.conversation_digest.chat_text",
+                return_value="今天在统计党员材料。",
+            ):
+                ConversationDigestService(config, repo).summarize(
+                    source["id"], ids["g1"], "2026-10-18"
+                )
+
+            statuses = {
+                message["platform_message_id"]: message["processing_status"]
+                for message in repo.list_messages(limit=10)
+            }
+            self.assertEqual(statuses, {"1": "processed", "2": "processed"})
 
 
 if __name__ == "__main__":
