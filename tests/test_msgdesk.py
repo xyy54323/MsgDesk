@@ -312,7 +312,7 @@ class AgentRangeTests(unittest.TestCase):
                 ]
             }, ensure_ascii=False)
             source = SourceContext(
-                "s1", "ai_web", "校内网", {"url": "https://example.com/"}
+                "s1", "ai_web", "网站", {"url": "https://example.com/"}
             )
             result = collector._finish(
                 payload, source, "https://example.com/", {}, []
