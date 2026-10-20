@@ -225,16 +225,10 @@ function buildTimePicker(anchor, current, onPick) {
   panel.className = 'date-pop time-pop';
   panel.innerHTML = `
     <div class="date-pop-head"><span class="date-pop-title">选择日报时间</span></div>
-    <div class="time-pop-cols">
-      <div class="time-pop-col">
-        <div class="time-pop-label">时</div>
-        <div class="time-pop-grid" data-kind="hour"></div>
-      </div>
-      <div class="time-pop-col">
-        <div class="time-pop-label">分</div>
-        <div class="time-pop-grid" data-kind="minute"></div>
-      </div>
-    </div>`;
+    <div class="time-pop-label">时</div>
+    <div class="time-pop-grid" data-kind="hour"></div>
+    <div class="time-pop-label">分</div>
+    <div class="time-pop-grid" data-kind="minute"></div>`;
   document.body.appendChild(panel);
   datePopEl = panel;
   panel.addEventListener('click', event => event.stopPropagation());
