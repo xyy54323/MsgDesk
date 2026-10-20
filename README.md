@@ -1,8 +1,20 @@
-# MsgDesk
+<p align="center">
+  <img src="packaging/icon/MsgDesk-256.png" width="112" alt="MsgDesk 应用图标">
+</p>
 
-MsgDesk 是一个本地运行的个人消息聚合与日报工具。它以只读方式采集指定网站和 QQ 群的通知，借助大模型完成分类、摘要与待办提取，并按日生成 Markdown 日报。
+<h1 align="center">MsgDesk</h1>
+
+<p align="center">本地运行的个人消息聚合与日报工具</p>
+
+MsgDesk 以只读方式采集指定网站和 QQ 群的通知，借助大模型完成分类、摘要与待办提取，并按日生成 Markdown 日报。
 
 系统不提供发送、回复、点赞或转发能力，所有数据保存在本机。
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshot.png" width="1000" alt="MsgDesk 消息页">
+</p>
 
 ## 功能概览
 

@@ -63,6 +63,10 @@ $out = Join-Path $root "dist\MsgDesk"
 Write-Host "[4/5] Copying config template"
 Copy-Item (Join-Path $root "config.example.json") (Join-Path $out "config.example.json") -Force
 Copy-Item (Join-Path $root "README.md") (Join-Path $out "README.md") -Force
+New-Item -ItemType Directory -Path (Join-Path $out "docs") -Force | Out-Null
+Copy-Item (Join-Path $root "docs\screenshot.png") (Join-Path $out "docs\screenshot.png") -Force
+New-Item -ItemType Directory -Path (Join-Path $out "packaging\icon") -Force | Out-Null
+Copy-Item (Join-Path $root "packaging\icon\MsgDesk-256.png") (Join-Path $out "packaging\icon\MsgDesk-256.png") -Force
 
 if (-not $SkipNapCat) {
     if (-not (Test-Path (Join-Path $root "vendor\napcat\napcat.bat"))) {
