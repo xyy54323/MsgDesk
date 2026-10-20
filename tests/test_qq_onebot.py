@@ -37,6 +37,8 @@ class _OneBotHandler(BaseHTTPRequestHandler):
             data = {"user_id": 123456789, "nickname": "测试帐号"}
         elif action in ("get_group_msg_history", "get_friend_msg_history"):
             data = {"messages": type(self).messages}
+        elif action == "get_group_file_url":
+            data = {"url": "https://example.com/notice.pdf"}
         else:
             data = {}
         self._send(200, {"status": "ok", "retcode": 0, "data": data})
@@ -194,6 +196,33 @@ class QQOneBotTests(unittest.TestCase):
         end = datetime.fromtimestamp(old + 3600, zone)
         result = QQOneBotAdapter().fetch_range(source(self.base), start, end)
         self.assertEqual([m.content_text for m in result.messages], ["旧消息"])
+
+    def test_file_segment_resolves_download_url(self) -> None:
+        now = int(time.time())
+        _OneBotHandler.messages = [
+            message(
+                501,
+                now,
+                [
+                    {
+                        "type": "file",
+                        "data": {
+                            "file": "通知.pdf",
+                            "file_id": "file-501",
+                        },
+                    }
+                ],
+            )
+        ]
+        result = QQOneBotAdapter().fetch_incremental(
+            source(self.base), Cursor(), FetchOptions()
+        )
+        self.assertEqual(len(result.messages), 1)
+        self.assertIn("[文件: 通知.pdf]", result.messages[0].content_text)
+        self.assertEqual(
+            result.messages[0].attachments[0]["url"],
+            "https://example.com/notice.pdf",
+        )
 
     def test_no_write_actions_are_called(self) -> None:
         _OneBotHandler.messages = []

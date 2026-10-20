@@ -4,6 +4,7 @@ import json
 import threading
 import unittest
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -13,15 +14,16 @@ from msgdesk.api.server import ApiServer
 from msgdesk.config import AppConfig
 from msgdesk.db import Database
 from msgdesk.errors import AppError
-from msgdesk.models import Cursor
+from msgdesk.models import Cursor, RawMessage
 from msgdesk.repository import Repository
 from msgdesk.runtime import Runtime
 from msgdesk.services.digest import DigestService
 from msgdesk.services.model import ModelInput, ModelProvider, create_model_provider
 from msgdesk.services.processing import ProcessingService
+from msgdesk.services.agent import AgentCollector
 from msgdesk.services.sync import SyncService
 from msgdesk.services.worker import Worker
-from msgdesk.timeutil import local_date_of
+from msgdesk.timeutil import iso_utc, local_date_of
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PAGE_URL = "https://example.com/page"
@@ -263,6 +265,88 @@ class DigestTests(unittest.TestCase):
             self.assertFalse(second["changed"])
             self.assertIn("实验室开放日安排", first_content)
             self.assertIn("今日待办", first_content)
+
+
+class AgentRangeTests(unittest.TestCase):
+    def test_agent_keeps_items_inside_global_range(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.date_range.start = "2026-09-01"
+            config.date_range.end = "2026-10-20"
+            collector = AgentCollector(config)
+            payload = json.dumps({
+                "items": [
+                    {
+                        "title": "范围内旧通知",
+                        "url": "https://example.com/old",
+                        "published_at": "2026-10-18",
+                        "content_md": "旧通知正文",
+                    },
+                    {
+                        "title": "范围外通知",
+                        "url": "https://example.com/outside",
+                        "published_at": "2026-08-01",
+                        "content_md": "范围外正文",
+                    },
+                    {
+                        "title": "今天通知",
+                        "url": "https://example.com/today",
+                        "published_at": "2026-10-20",
+                        "content_md": "今天正文",
+                    },
+                ]
+            }, ensure_ascii=False)
+            source = SourceContext(
+                "s1", "ai_web", "校内网", {"url": "https://example.com/"}
+            )
+            result = collector._finish(
+                payload, source, "https://example.com/", {}, []
+            )
+            self.assertEqual(
+                [message.conversation_name for message in result.messages],
+                ["范围内旧通知", "今天通知"],
+            )
+
+
+class AttachmentTests(unittest.TestCase):
+    def test_attachment_download_keeps_file_type(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b"docx-content"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, fmt, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config = build_config(root)
+                service = SyncService(config, build_repo(root))
+                raw = RawMessage(
+                    content_text="[文件: 通知.docx]",
+                    published_at=iso_utc(),
+                    attachments=[{
+                        "type": "file",
+                        "name": "通知.docx",
+                        "url": f"http://127.0.0.1:{server.server_address[1]}/file",
+                    }],
+                )
+                saved = service._download_attachments(raw, "source-123", [])
+                self.assertEqual(saved[0][0], "通知.docx")
+                self.assertTrue(saved[0][1].endswith(".docx"))
+                stored = root / "data" / saved[0][1].lstrip("/")
+                self.assertEqual(stored.read_bytes(), b"docx-content")
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 class JobTests(unittest.TestCase):

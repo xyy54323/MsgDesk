@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -103,6 +106,7 @@ class SyncService:
         raw_dir = self._raw_dir()
         now = iso_utc()
         qq_slices: set[tuple[str, str]] = set()
+        warnings: list[str] = []
         is_qq = source_row["adapter_type"] == "qq_onebot"
         with self.repo.db.connection() as conn:
             for raw in result.messages:
@@ -163,6 +167,14 @@ class SyncService:
                             )
                             stats["merged"] += 1
                             continue
+                    attachments = self._download_attachments(
+                        raw, source_id, warnings
+                    )
+                    if attachments:
+                        text += "\n\n## 附件\n\n" + "\n".join(
+                            f"- [{name}]({url})" for name, url in attachments
+                        )
+                        digest = content_hash(text)
                     raw_ref = self._write_raw(raw_dir, source_id, raw.raw_payload or {
                         "content_text": text,
                         "source_url": raw.source_url,
@@ -235,6 +247,7 @@ class SyncService:
                     etag=next_cursor.etag,
                     last_modified=next_cursor.last_modified,
                 )
+        result.warnings.extend(warnings)
         self.repo.mark_source_success(source_id)
         return {
             "trace_id": trace_id,
@@ -265,6 +278,47 @@ class SyncService:
         path = self.config.data_dir / "raw" / now.strftime("%Y") / now.strftime("%m") / now.strftime("%d")
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def _download_attachments(
+        self,
+        raw: Any,
+        source_id: str,
+        warnings: list[str],
+    ) -> list[tuple[str, str]]:
+        """Download every attachment exposed by a source, regardless of type."""
+        saved: list[tuple[str, str]] = []
+        date_text = local_date_of(raw.published_at, self.config.system.timezone)
+        root = self.config.data_dir / "attachments" / date_text
+        for entry in getattr(raw, "attachments", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url") or "").strip()
+            name = str(entry.get("name") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                continue
+            if not name:
+                name = Path(url.split("?", 1)[0]).name or "attachment"
+            request = urllib.request.Request(
+                url, headers={"User-Agent": "MsgDesk/0.1"}
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    body = response.read(50 * 1024 * 1024 + 1)
+            except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+                warnings.append(f"附件下载失败 {name}: {type(exc).__name__}")
+                continue
+            if len(body) > 50 * 1024 * 1024:
+                warnings.append(f"附件过大，已跳过 {name}")
+                continue
+            safe_name = re.sub(r"[^\w.\-]+", "_", Path(name).name) or "attachment.bin"
+            if not Path(safe_name).suffix:
+                suffix = Path(url.split("?", 1)[0]).suffix
+                safe_name += suffix if suffix else ".bin"
+            root.mkdir(parents=True, exist_ok=True)
+            stored_name = f"{source_id[:8]}-{uuid.uuid4().hex[:8]}-{safe_name}"
+            (root / stored_name).write_bytes(body)
+            saved.append((name, f"/attachments/{date_text}/{stored_name}"))
+        return saved
 
     @staticmethod
     def _write_raw(directory: Path, source_id: str, payload: dict[str, Any], now: str) -> Path:

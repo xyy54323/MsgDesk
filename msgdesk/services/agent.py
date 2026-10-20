@@ -54,7 +54,11 @@ class AgentCollector:
         self.fetcher = HttpFetcher()
         self.zone = local_zone(config.system.timezone)
         self.today = datetime.now(self.zone).date()
-        self.media_root = Path(config.data_dir) / "media" / self.today.isoformat()
+        self.range_start, self.range_end = config.effective_range()
+        if not self.range_start:
+            self.range_start = self.today.isoformat()
+        if not self.range_end:
+            self.range_end = self.today.isoformat()
         self._browser = None
 
     def _ensure_context(self):
@@ -296,10 +300,11 @@ class AgentCollector:
     def _system_prompt(self, extra: str, docs: str = "") -> str:
         base = (
             "你是一个信息采集智能体。你有 fetch_page 工具，可以抓取任意网页。\n"
-            f"今天是 {self.today.isoformat()}（时区 {self.config.system.timezone}）。\n"
+            f"当前日期是 {self.today.isoformat()}（时区 {self.config.system.timezone}）。\n"
+            f"采集日期范围是 {self.range_start} 至 {self.range_end}（含首尾）。\n"
             "工作方式：先抓取起始地址，阅读内容；如果它是列表页，挑选真正需要归档的条目并逐条抓取详情。\n"
-            "列表页里今天发布的每一条都要单独调用 fetch_page 抓详情，不要遗漏，也不要只看第一条。\n"
-            "只保留发布日期是今天的条目；无法确认日期的条目一律丢弃。\n"
+            "列表页里发布日期在采集范围内的每一条都要单独调用 fetch_page 抓详情，不要遗漏，也不要只看第一条。\n"
+            "只保留发布日期在采集范围内的条目；无法确认日期的条目一律丢弃。\n"
             "抓够之后，输出一个 JSON 对象，不要输出任何其他文字：\n"
             '{"items":[{"title":"标题","url":"原文地址","published_at":"YYYY-MM-DD",'
             '"summary":"两三句话的摘要","content_md":"用 Markdown 记录的正文，图片写成 ![](图片地址)",'
@@ -333,7 +338,13 @@ class AgentCollector:
             if not isinstance(item, dict):
                 continue
             published = parse_datetime(str(item.get("published_at") or ""))
-            if published is None or published.astimezone(self.zone).date() != self.today:
+            published_day = (
+                published.astimezone(self.zone).date().isoformat()
+                if published is not None else ""
+            )
+            if not published_day or not (
+                self.range_start <= published_day <= self.range_end
+            ):
                 skipped += 1
                 continue
             link = str(item.get("url") or base_url).strip()
@@ -344,7 +355,9 @@ class AgentCollector:
             for url in inline_images:
                 if url not in image_urls:
                     image_urls.append(url)
-            local_images = self._download_images(image_urls, headers, warnings)
+            local_images = self._download_images(
+                image_urls, headers, warnings, published_day
+            )
             if local_images:
                 for remote, local in local_images.items():
                     content = content.replace(remote, local)
@@ -352,7 +365,9 @@ class AgentCollector:
                     content += "\n\n" + "\n".join(
                         f"![图片]({path})" for path in local_images.values()
                     )
-            attachments = self._download_attachments(item.get("attachments") or [], headers, warnings)
+            attachments = self._download_attachments(
+                item.get("attachments") or [], headers, warnings, published_day
+            )
             if attachments:
                 content += "\n\n## 附件\n\n" + "\n".join(
                     f"- [{name}]({path})" for name, path in attachments
@@ -382,7 +397,8 @@ class AgentCollector:
         )
 
     def _download_images(
-        self, urls: list[str], headers: dict[str, str], warnings: list[str]
+        self, urls: list[str], headers: dict[str, str], warnings: list[str],
+        date_text: str,
     ) -> dict[str, str]:
         saved: dict[str, str] = {}
         for index, url in enumerate(urls[:6]):
@@ -392,18 +408,20 @@ class AgentCollector:
                 warnings.append(f"图片下载失败 {url}: {type(exc).__name__}")
                 continue
             suffix = _image_suffix(url, resp_headers.get("content-type", ""))
-            self.media_root.mkdir(parents=True, exist_ok=True)
+            root = Path(self.config.data_dir) / "media" / date_text
+            root.mkdir(parents=True, exist_ok=True)
             name = f"{abs(hash(url)) % (10 ** 10)}-{index}{suffix}"
-            path = self.media_root / name
+            path = root / name
             path.write_bytes(body)
-            saved[url] = f"/media/{self.today.isoformat()}/{name}"
+            saved[url] = f"/media/{date_text}/{name}"
         return saved
 
     def _download_attachments(
-        self, entries: list[Any], headers: dict[str, str], warnings: list[str]
+        self, entries: list[Any], headers: dict[str, str], warnings: list[str],
+        date_text: str,
     ) -> list[tuple[str, str]]:
         saved: list[tuple[str, str]] = []
-        root = Path(self.config.data_dir) / "attachments" / self.today.isoformat()
+        root = Path(self.config.data_dir) / "attachments" / date_text
         for entry in entries[:8]:
             if not isinstance(entry, dict):
                 continue
@@ -425,7 +443,7 @@ class AgentCollector:
             root.mkdir(parents=True, exist_ok=True)
             path = root / f"{abs(hash(url)) % (10 ** 8)}-{safe}"
             path.write_bytes(body)
-            saved.append((name, f"/attachments/{self.today.isoformat()}/{path.name}"))
+            saved.append((name, f"/attachments/{date_text}/{path.name}"))
         return saved
 
 

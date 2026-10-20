@@ -103,7 +103,8 @@ MVP 只支持两种来源：
   `fetch_page` 工具，只保留当天发布的内容，正文转 Markdown，图片落到
   `data/media/日期/`。
 - **QQ**：通过本机 NapCat + OneBot 只读接入。来源页扫码登录后勾选群，
-  每个群每天汇总一次。群文件下载仍是待补项。
+  每个群每天汇总一次。消息里的图片和文件会下载到 `data/attachments/日期/`，
+  不限制文件类型。
 
 微信、企业微信、RSS 和本地聊天导入不在 MVP 范围内。
 
@@ -128,7 +129,7 @@ F:\env\python\python.exe -m unittest discover -s tests -t .
 F:\env\python\python.exe -m compileall -q msgdesk
 ```
 
-当前基线为 40 项单元测试。
+当前基线为 43 项单元测试。
 
 ## 边界
 

@@ -154,7 +154,7 @@ class QQOneBotAdapter(BaseAdapter):
                         continue
                 elif timestamp is not None and timestamp < today_start:
                     continue
-                converted = self._convert(item, conversation_id)
+                converted = self._convert(item, conversation_id, source)
                 if converted is not None:
                     messages.append(converted)
 
@@ -286,7 +286,7 @@ class QQOneBotAdapter(BaseAdapter):
                     continue
                 if timestamp.timestamp() < start_ts or timestamp.timestamp() > end_ts:
                     continue
-                converted = self._convert(item, conversation_id)
+                converted = self._convert(item, conversation_id, source)
                 if converted is not None:
                     messages.append(converted)
         messages.sort(key=lambda item: item.published_at)
@@ -471,7 +471,12 @@ class QQOneBotAdapter(BaseAdapter):
             )
         return parsed
 
-    def _convert(self, item: dict[str, Any], fallback_conversation: str) -> RawMessage | None:
+    def _convert(
+        self,
+        item: dict[str, Any],
+        fallback_conversation: str,
+        source: SourceContext | None = None,
+    ) -> RawMessage | None:
         message_type = str(item.get("message_type") or "group")
         group_id = item.get("group_id")
         user_id = item.get("user_id")
@@ -509,12 +514,22 @@ class QQOneBotAdapter(BaseAdapter):
                         }
                     )
                 elif segment_type == "file":
-                    text_parts.append("[文件]")
+                    file_name = str(data.get("name") or data.get("file") or "").strip()
+                    text_parts.append(f"[文件: {file_name}]" if file_name else "[文件]")
+                    file_id = str(
+                        data.get("file_id") or data.get("fileId") or data.get("file") or ""
+                    ).strip()
+                    file_url = str(data.get("url") or "").strip()
+                    if not file_url and file_id and source is not None:
+                        file_url = self._resolve_file_url(
+                            source, conversation_kind, conversation_id, file_id, data
+                        )
                     attachments.append(
                         {
                             "type": "file",
-                            "name": data.get("file") or data.get("name"),
-                            "url": data.get("url"),
+                            "name": file_name or None,
+                            "file_id": file_id or None,
+                            "url": file_url or None,
                         }
                     )
                 elif segment_type == "at":
@@ -548,6 +563,40 @@ class QQOneBotAdapter(BaseAdapter):
             attachments=[a for a in attachments if a.get("url") or a.get("name")],
             raw_payload={"platform": "qq", **item},
         )
+
+    def _resolve_file_url(
+        self,
+        source: SourceContext,
+        conversation_kind: str,
+        conversation_id: str,
+        file_id: str,
+        data: dict[str, Any],
+    ) -> str:
+        """Resolve a OneBot file id to a temporary download URL."""
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        if conversation_kind == "group":
+            params = {"group_id": conversation_id, "file_id": file_id}
+            busid = data.get("busid")
+            if busid not in (None, ""):
+                params["busid"] = busid
+            candidates.append(("get_group_file_url", params))
+        else:
+            candidates.append(
+                ("get_private_file_url", {"user_id": conversation_id, "file_id": file_id})
+            )
+        candidates.append(("get_file", {"file_id": file_id}))
+        for action, params in candidates:
+            try:
+                payload = self._call(source, action, params)
+            except AppError:
+                continue
+            result = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+            if isinstance(result, dict):
+                for key in ("url", "file_url", "file"):
+                    value = str(result.get(key) or "").strip()
+                    if value.startswith(("http://", "https://")):
+                        return value
+        return ""
 
     @staticmethod
     def _timestamp(value: Any) -> datetime | None:
