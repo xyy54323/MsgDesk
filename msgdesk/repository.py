@@ -8,6 +8,7 @@ import uuid
 from datetime import timedelta
 from typing import Any, Iterable
 
+from . import __version__
 from .db import Database
 from .timeutil import iso_utc, utc_now
 
@@ -663,7 +664,7 @@ class Repository:
                 (
                     processing_id,
                     message_id,
-                    result.get("processor_version", "0.1.0"),
+                    result.get("processor_version", __version__),
                     result.get("rule_version"),
                     result.get("model_provider"),
                     result.get("model_name"),

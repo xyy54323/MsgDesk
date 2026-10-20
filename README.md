@@ -96,7 +96,7 @@ digests/          按日期生成的 Markdown 日报
 ## 从源码运行
 
 ```powershell
-python -m pip install pywebview==6.2.1 pythonnet==3.2.1
+python -m pip install -r requirements.txt
 python -m msgdesk --config .\config.json init
 python -m msgdesk --config .\config.json serve --desktop
 ```
@@ -119,7 +119,7 @@ python -m unittest discover -s tests -t .
 python -m compileall -q msgdesk
 ```
 
-当前基线为 45 项单元测试。
+当前基线为 49 项单元测试。
 
 ## 隐私与安全
 

@@ -5,12 +5,19 @@
 
 param(
     [string]$Iscc = "",
-    [string]$Version = "0.1.0"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+if (-not $Version) {
+    $init = Get-Content (Join-Path $root "msgdesk\__init__.py") -Raw
+    $match = [regex]::Match($init, '__version__\s*=\s*"([^"]+)"')
+    if (-not $match.Success) { throw "Cannot read __version__ from msgdesk\__init__.py" }
+    $Version = $match.Groups[1].Value
+}
 
 if (-not $Iscc) {
     foreach ($candidate in @(

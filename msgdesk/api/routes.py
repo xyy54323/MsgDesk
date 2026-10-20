@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from ..adapters import create_adapter, list_adapter_capabilities
 from ..adapters.base import SourceContext
+from .. import __version__
 from ..config import (
     ModelProviderConfig,
     activate_model_provider,
@@ -75,7 +76,7 @@ class ApiRouter:
             disk = shutil.disk_usage(config.data_dir)
             return 200, {
                 "status": "ok",
-                "version": "0.2.0",
+                "version": __version__,
                 "schema_version": self.runtime.db.schema_version(),
                 "time": iso_utc(),
                 "data_dir": str(config.data_dir),

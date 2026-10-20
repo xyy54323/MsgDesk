@@ -6,6 +6,7 @@ import json
 from datetime import timedelta
 from typing import Any
 
+from .. import __version__
 from ..config import AppConfig
 from ..errors import AppError
 from ..repository import Repository
@@ -94,7 +95,7 @@ class ProcessingService:
         merged = dict(result)
         merged["status"] = "success"
         merged["error_code"] = None
-        merged["processor_version"] = "0.2.0"
+        merged["processor_version"] = __version__
         merged["model_provider"] = self.model.name
         merged["model_name"] = self.model.model_name
         if source.get("default_category"):

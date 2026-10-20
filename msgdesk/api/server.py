@@ -10,6 +10,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from .. import __version__
 from ..errors import AppError
 from ..paths import package_root
 from ..runtime import Runtime
@@ -23,7 +24,7 @@ MAX_BODY = 2 * 1024 * 1024
 class ApiHandler(BaseHTTPRequestHandler):
     runtime: Runtime
     router: ApiRouter
-    server_version = "MsgDesk/0.2"
+    server_version = f"MsgDesk/{__version__}"
 
     def do_GET(self) -> None:
         self._handle("GET")

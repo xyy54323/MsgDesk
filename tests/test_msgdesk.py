@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from msgdesk import __version__
 from msgdesk.adapters.base import BaseAdapter, FetchOptions, FetchResponse, SourceContext
 from msgdesk.adapters.web import WebAdapter
 from msgdesk.api.server import ApiServer
@@ -436,6 +437,7 @@ class ApiTests(unittest.TestCase):
                 with urllib.request.urlopen(base + "/api/health", timeout=5) as response:
                     health = json.loads(response.read())
                 self.assertEqual(health["status"], "ok")
+                self.assertEqual(health["version"], __version__)
                 payload = json.dumps({
                     "type": "ai_web",
                     "name": "API 来源",

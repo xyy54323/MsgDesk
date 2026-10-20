@@ -1,0 +1,4 @@
+# Runtime dependencies for running MsgDesk from source.
+# The packaged desktop app bundles these; only source runs need this file.
+pywebview==6.2.1
+pythonnet==3.2.1
