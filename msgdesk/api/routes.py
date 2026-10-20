@@ -141,7 +141,8 @@ class ApiRouter:
                 datetime.strptime(digest_time, "%H:%M")
             except ValueError:
                 raise AppError("VALIDATION_ERROR", "日报时间必须使用 HH:MM 格式") from None
-            retention_days = int(config.system.retention_days)
+            previous_retention = int(config.system.retention_days)
+            retention_days = previous_retention
             if retention_value is not None:
                 try:
                     retention_days = int(retention_value)
@@ -167,6 +168,13 @@ class ApiRouter:
             config.date_range.end = end
             config.scheduling.digest_time = digest_time
             config.system.retention_days = retention_days
+            if (
+                retention_value is not None
+                and retention_days > 0
+                and retention_days != previous_retention
+                and not repo.has_active_job("maintenance")
+            ):
+                repo.enqueue_job("maintenance", priority=200)
             autostart_active = autostart.is_enabled()
             if autostart_enabled is not None:
                 config.system.autostart = bool(autostart_enabled)
@@ -182,6 +190,7 @@ class ApiRouter:
                     "end": end,
                     "digest_time": digest_time,
                     "autostart": config.system.autostart,
+                    "retention_days": retention_days,
                 },
             )
             return 200, {
