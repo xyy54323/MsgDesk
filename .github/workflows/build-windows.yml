@@ -16,9 +16,13 @@ on:
         description: "打包网站登录用的 Chromium（约 150MB）"
         type: boolean
         default: false
+      publish_release:
+        description: "构建成功后发布 GitHub Release（标签 v<版本号>）"
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -103,3 +107,36 @@ jobs:
             dist/MsgDesk-win64.zip
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ inputs.version }}"
+          $tag = "v$version"
+          $notes = @(
+            "MsgDesk $version — 个人消息工作台",
+            "",
+            "## 功能",
+            "- QQ 群消息采集（NapCat）：文本、文件、图片，原图失效时回退本机缓存",
+            "- 校内网通知采集：正文图片本地化，附件链接可点击",
+            "- 消息页：按日期分组，来源筛选、搜索、已读 / 忽略 / 分类",
+            "- 每日日报：可配置生成时间，含群聊摘要与待办",
+            "- 基础配置：全局时间范围、开机自启",
+            "",
+            "## 安装",
+            "下载 MsgDesk-Setup-$version.exe 双击安装，无需管理员权限。",
+            "",
+            "## 说明",
+            "- 内置 NapCat，首次使用需扫码登录 QQ",
+            "- 校内网附件走下载页验证码，需在浏览器里手动输入"
+          ) -join "`n"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag 已存在" }
+          gh release create $tag `
+            "dist\MsgDesk-Setup-$version.exe" `
+            "dist\MsgDesk-win64.zip" `
+            --title "MsgDesk $version" `
+            --notes $notes
