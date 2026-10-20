@@ -37,6 +37,7 @@ if (-not (Test-Path (Join-Path $app "MsgDesk.exe"))) {
 $work = Join-Path $root "build\installer"
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 Copy-Item (Join-Path $root "packaging\ChineseSimplified.isl") $work -Force
+Copy-Item (Join-Path $root "packaging\icon\MsgDesk.ico") $work -Force
 
 $iss = Get-Content (Join-Path $root "packaging\MsgDesk.iss") -Raw -Encoding UTF8
 $iss = $iss -replace '#define AppVersion ".*"', "#define AppVersion ""$Version"""

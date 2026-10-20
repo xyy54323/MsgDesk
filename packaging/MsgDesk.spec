@@ -6,6 +6,7 @@ import os
 from PyInstaller.utils.hooks import collect_all
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
+ICON = os.path.join(ROOT, "packaging", "icon", "MsgDesk.ico")
 
 datas = [
     (os.path.join(ROOT, "msgdesk", "api", "static"), "msgdesk/api/static"),
@@ -43,6 +44,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="MsgDesk",
+    icon=ICON,
     debug=False,
     strip=False,
     upx=False,
@@ -55,6 +57,7 @@ cli = EXE(
     [],
     exclude_binaries=True,
     name="MsgDesk-cli",
+    icon=ICON,
     debug=False,
     strip=False,
     upx=False,

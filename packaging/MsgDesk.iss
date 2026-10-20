@@ -2,7 +2,7 @@
 ; Built by scripts\build_installer.ps1
 
 #define AppName "MsgDesk"
-#define AppNameZh "MsgDesk 个人消息工作台"
+#define AppNameZh "MsgDesk"
 #define AppVersion "0.1.0"
 #define AppPublisher "MsgDesk"
 #define AppExe "MsgDesk.exe"
@@ -36,6 +36,7 @@ MinVersion=10.0
 CloseApplications=yes
 RestartApplications=no
 AllowNoIcons=yes
+SetupIconFile=MsgDesk.ico
 
 [Languages]
 Name: "chs"; MessagesFile: "ChineseSimplified.isl"

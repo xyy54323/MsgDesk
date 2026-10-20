@@ -246,7 +246,7 @@ def cmd_serve(
         thread.start()
         target = f"http://{host}:{port}/"
         webview.create_window(
-            "MsgDesk 个人消息工作台",
+            "MsgDesk",
             target,
             width=1440,
             height=920,
