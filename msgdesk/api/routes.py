@@ -117,6 +117,7 @@ class ApiRouter:
                 "digest_time": config.scheduling.digest_time,
                 "autostart": bool(config.system.autostart),
                 "autostart_active": autostart.is_enabled(),
+                "retention_days": int(config.system.retention_days),
             }
 
         if path == "/api/range" and method in ("POST", "PUT"):
@@ -126,6 +127,7 @@ class ApiRouter:
                 body.get("digest_time") or config.scheduling.digest_time
             ).strip()
             autostart_enabled = body.get("autostart")
+            retention_value = body.get("retention_days")
             if not start:
                 raise AppError("VALIDATION_ERROR", "起始日期必填")
             try:
@@ -139,6 +141,14 @@ class ApiRouter:
                 datetime.strptime(digest_time, "%H:%M")
             except ValueError:
                 raise AppError("VALIDATION_ERROR", "日报时间必须使用 HH:MM 格式") from None
+            retention_days = int(config.system.retention_days)
+            if retention_value is not None:
+                try:
+                    retention_days = int(retention_value)
+                except (TypeError, ValueError):
+                    raise AppError("VALIDATION_ERROR", "数据保留天数必须是整数") from None
+                if retention_days < 0 or retention_days > 3650:
+                    raise AppError("VALIDATION_ERROR", "数据保留天数需在 0 到 3650 之间")
             if not config.config_path:
                 raise AppError("CONFIG_INVALID", "没有配置文件，无法保存时间范围")
             updates: dict[str, Any] = {
@@ -147,6 +157,8 @@ class ApiRouter:
             }
             if autostart_enabled is not None:
                 updates["system"] = {"autostart": bool(autostart_enabled)}
+            if retention_value is not None:
+                updates.setdefault("system", {})["retention_days"] = retention_days
             merge_config_file(
                 config.config_path,
                 updates,
@@ -154,6 +166,7 @@ class ApiRouter:
             config.date_range.start = start
             config.date_range.end = end
             config.scheduling.digest_time = digest_time
+            config.system.retention_days = retention_days
             autostart_active = autostart.is_enabled()
             if autostart_enabled is not None:
                 config.system.autostart = bool(autostart_enabled)
@@ -180,6 +193,7 @@ class ApiRouter:
                 "digest_time": digest_time,
                 "autostart": bool(config.system.autostart),
                 "autostart_active": autostart_active,
+                "retention_days": retention_days,
             }
 
         if method == "GET" and path == "/api/status":

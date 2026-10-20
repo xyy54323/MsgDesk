@@ -195,6 +195,7 @@ class UiApiTests(unittest.TestCase):
                             "end": "",
                             "digest_time": "21:30",
                             "autostart": True,
+                            "retention_days": 60,
                         },
                     )
                 self.assertEqual(status, 200)
@@ -204,11 +205,13 @@ class UiApiTests(unittest.TestCase):
                 self.assertEqual(payload["digest_time"], "21:30")
                 self.assertTrue(payload["autostart"])
                 self.assertTrue(payload["autostart_active"])
+                self.assertEqual(payload["retention_days"], 60)
                 saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
                 self.assertEqual(saved["range"]["start"], "2026-09-01")
                 self.assertEqual(saved["range"]["end"], "")
                 self.assertEqual(saved["scheduling"]["digest_time"], "21:30")
                 self.assertTrue(saved["system"]["autostart"])
+                self.assertEqual(saved["system"]["retention_days"], 60)
                 self.assertEqual(runtime.config.scheduling.digest_time, "21:30")
 
                 status, error = _request(
@@ -225,6 +228,15 @@ class UiApiTests(unittest.TestCase):
                     "POST",
                     "/api/range",
                     {"start": "2026-09-01", "end": "", "digest_time": "25:00"},
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(error["code"], "VALIDATION_ERROR")
+
+                status, error = _request(
+                    base,
+                    "POST",
+                    "/api/range",
+                    {"start": "2026-09-01", "end": "", "retention_days": -1},
                 )
                 self.assertEqual(status, 400)
                 self.assertEqual(error["code"], "VALIDATION_ERROR")

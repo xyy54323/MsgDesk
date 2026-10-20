@@ -156,6 +156,20 @@
               <label class="check"><input type="checkbox" id="autostartEnabled"> 开机后自动运行并在后台采集</label>
             </div>
           </div>
+          <div class="form-grid" style="margin-top:14px">
+            <div class="field">
+              <span class="field-title">数据保留</span>
+              <select id="retentionDays">
+                <option value="0">关闭自动清理</option>
+                <option value="30">保留最近 30 天</option>
+                <option value="60">保留最近 60 天</option>
+                <option value="90">保留最近 90 天</option>
+                <option value="180">保留最近 180 天</option>
+                <option value="365">保留最近 365 天</option>
+              </select>
+              <span class="muted tiny">每天自动备份数据库（保留 7 份）；超过保留期的消息、图片、附件与原始快照会被清理。</span>
+            </div>
+          </div>
           <div class="row" style="margin-top:16px;gap:10px;align-items:center">
             <button class="btn primary" onclick="saveRange()">保存基础配置</button>
             <span class="muted tiny" id="rangeStatus"></span>

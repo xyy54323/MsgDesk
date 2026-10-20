@@ -10,6 +10,7 @@ from .config import AppConfig, merge_config_file
 from .db import Database
 from .repository import Repository, loads
 from .services.digest import DigestService
+from .services.maintenance import MaintenanceService
 from .services.model import create_model_provider
 from .services.processing import ProcessingService
 from .services.scheduler import Scheduler
@@ -34,12 +35,14 @@ class Runtime:
         self.processing_service = ProcessingService(config, self.repo, self.model)
         self.digest_service = DigestService(config, self.repo)
         self.conversation_digest_service = ConversationDigestService(config, self.repo)
+        self.maintenance_service = MaintenanceService(config, self.repo)
         self.worker = Worker(
             self.repo,
             self.sync_service,
             self.processing_service,
             self.digest_service,
             self.conversation_digest_service,
+            self.maintenance_service,
         )
         self.scheduler = Scheduler(config, self.repo)
         self.session_keeper = SessionKeeper(config, self.repo)

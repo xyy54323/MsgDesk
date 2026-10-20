@@ -2332,6 +2332,8 @@ async function loadRange() {
   if (digestTime) digestTime.value = result.data.digest_time || '22:00';
   const autostart = document.getElementById('autostartEnabled');
   if (autostart) autostart.checked = Boolean(result.data.autostart);
+  const retention = document.getElementById('retentionDays');
+  if (retention) retention.value = String(result.data.retention_days ?? 0);
   if (status) {
     const parts = [];
     if (range.effective_end) parts.push(`当前日报截止：${range.effective_end}`);
@@ -2346,6 +2348,7 @@ async function saveRange() {
   const end = document.getElementById('rangeEnd')?.value.trim() || '';
   const digestTime = document.getElementById('digestTime')?.value || '22:00';
   const autostart = Boolean(document.getElementById('autostartEnabled')?.checked);
+  const retentionDays = Number(document.getElementById('retentionDays')?.value || 0);
   const status = document.getElementById('rangeStatus');
   if (!start) {
     toast('请选择起始日期', true);
@@ -2354,7 +2357,9 @@ async function saveRange() {
   try {
     const result = await api('/api/range', {
       method: 'POST',
-      body: JSON.stringify({ start, end, digest_time: digestTime, autostart })
+      body: JSON.stringify({
+        start, end, digest_time: digestTime, autostart, retention_days: retentionDays
+      })
     });
     if (status) {
       const parts = [`已保存，当前日报截止：${result.range.effective_end}`];

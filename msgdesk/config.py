@@ -39,6 +39,7 @@ class SystemConfig:
     port: int = 8080
     log_level: str = "INFO"
     autostart: bool = False
+    retention_days: int = 0
 
 
 @dataclass
@@ -152,6 +153,7 @@ class AppConfig:
                 "bind_host": self.system.bind_host,
                 "port": self.system.port,
                 "autostart": self.system.autostart,
+                "retention_days": self.system.retention_days,
             },
             "scheduling": {
                 "default_interval_minutes": self.scheduling.default_interval_minutes,

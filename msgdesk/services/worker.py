@@ -13,6 +13,7 @@ from .digest import DigestService
 from .conversation_digest import ConversationDigestService
 from .processing import ProcessingService
 from .sync import SyncService
+from .maintenance import MaintenanceService
 
 log = logging.getLogger("msgdesk.worker")
 
@@ -25,12 +26,14 @@ class Worker:
         processing_service: ProcessingService,
         digest_service: DigestService,
         conversation_digest_service: ConversationDigestService | None = None,
+        maintenance_service: MaintenanceService | None = None,
     ):
         self.repo = repo
         self.sync_service = sync_service
         self.processing_service = processing_service
         self.digest_service = digest_service
         self.conversation_digest_service = conversation_digest_service
+        self.maintenance_service = maintenance_service
 
     def run_once(self) -> bool:
         job = self.repo.claim_next_job()
@@ -94,6 +97,10 @@ class Worker:
                     )
         elif job_type == "generate_digest":
             self.digest_service.generate(payload.get("date"))
+        elif job_type == "maintenance":
+            if self.maintenance_service is None:
+                raise AppError("VALIDATION_ERROR", "维护服务未初始化")
+            self.maintenance_service.run()
         else:
             raise AppError("VALIDATION_ERROR", f"未知任务类型: {job_type}")
 

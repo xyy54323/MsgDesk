@@ -51,6 +51,9 @@ class Scheduler:
                         "generate_digest", payload={"date": today}, priority=150
                     )
                 )
+        backup = self.config.data_dir / "backups" / f"messages-{today}.db"
+        if not backup.exists() and not self.repo.has_active_job("maintenance"):
+            created.append(self.repo.enqueue_job("maintenance", priority=200))
         return created
 
     def run_forever(self, stop_event: threading.Event) -> None:
