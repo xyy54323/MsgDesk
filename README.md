@@ -129,7 +129,17 @@ F:\env\python\python.exe -m unittest discover -s tests -t .
 F:\env\python\python.exe -m compileall -q msgdesk
 ```
 
-当前基线为 44 项单元测试。
+当前基线为 45 项单元测试。
+
+## 打包（GitHub Actions）
+
+Windows 安装包在 GitHub 上构建，不在本机打包。仓库 Actions 页面选择
+「Build Windows Package」→ Run workflow，填写版本号后运行；结束后在该次
+运行的 Artifacts 里下载 `MsgDesk-Setup-<版本>.exe` 和 `MsgDesk-win64.zip`。
+
+可选项：是否内置 QQ 桥接 NapCat（默认是，约 345MB）、是否内置网站登录用的
+Chromium（默认否）。工作流会先跑单元测试、再做打包烟雾测试，并检查产物中
+不含 `config.json`、`data/`、`digests/` 等个人数据。
 
 ## 边界
 

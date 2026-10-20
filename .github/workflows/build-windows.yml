@@ -1,0 +1,101 @@
+name: Build Windows Package
+
+# Manual builds only: Actions tab -> Build Windows Package -> Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "安装包版本号（例如 0.2.0）"
+        required: true
+        default: "0.2.0"
+      bundle_napcat:
+        description: "打包 QQ 桥接 NapCat（约 345MB）"
+        type: boolean
+        default: true
+      with_browser:
+        description: "打包网站登录用的 Chromium（约 150MB）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      BUNDLE_NAPCAT: ${{ inputs.bundle_napcat }}
+      WITH_BROWSER: ${{ inputs.with_browser }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller==6.22.3 pywebview==6.2.1 pythonnet==3.2.1
+
+      - name: Validate version
+        shell: pwsh
+        run: |
+          if ("${{ inputs.version }}" -notmatch '^\d+\.\d+\.\d+$') {
+            throw "版本号必须形如 0.2.0"
+          }
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -t .
+
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found after install" }
+
+      - name: Prepare NapCat
+        if: ${{ inputs.bundle_napcat }}
+        run: python scripts/napcat.py install
+
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          $args = @()
+          if ($env:BUNDLE_NAPCAT -ne "true") { $args += "-SkipNapCat" }
+          if ($env:WITH_BROWSER -eq "true") { $args += "-WithBrowser" }
+          ./scripts/build_package.ps1 @args
+
+      - name: Smoke test packaged app
+        shell: pwsh
+        run: ./scripts/smoke_package.ps1
+
+      - name: Verify no personal data in package
+        shell: pwsh
+        run: |
+          foreach ($relative in @("config.json", "data", "digests")) {
+            if (Test-Path (Join-Path "dist\MsgDesk" $relative)) {
+              throw "构建产物包含个人数据: $relative"
+            }
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: ./scripts/build_installer.ps1 -Version "${{ inputs.version }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MsgDesk-${{ inputs.version }}
+          path: |
+            dist/MsgDesk-Setup-${{ inputs.version }}.exe
+            dist/MsgDesk-win64.zip
+          if-no-files-found: error
+          retention-days: 14
