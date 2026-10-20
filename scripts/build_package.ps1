@@ -26,6 +26,7 @@ function Resolve-Python {
     )) {
         if (Test-Path $candidate) { return $candidate }
     }
+    if (Get-Command python -ErrorAction SilentlyContinue) { return "python" }
     if (Get-Command py -ErrorAction SilentlyContinue) { return "py" }
     return "python"
 }
@@ -97,3 +98,4 @@ $zip = Join-Path $root "dist\MsgDesk-win64.zip"
 if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $out "*") -DestinationPath $zip -CompressionLevel Optimal
 Write-Host "Done: $zip"
+exit 0

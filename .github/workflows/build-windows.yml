@@ -72,7 +72,7 @@ jobs:
           $args = @()
           if ($env:BUNDLE_NAPCAT -ne "true") { $args += "-SkipNapCat" }
           if ($env:WITH_BROWSER -eq "true") { $args += "-WithBrowser" }
-          ./scripts/build_package.ps1 @args
+          ./scripts/build_package.ps1 -Python python @args
 
       - name: Smoke test packaged app
         shell: pwsh
@@ -85,6 +85,9 @@ jobs:
             if (Test-Path (Join-Path "dist\MsgDesk" $relative)) {
               throw "构建产物包含个人数据: $relative"
             }
+          }
+          if (-not (Test-Path "dist\MsgDesk\_internal\webview")) {
+            throw "打包结果缺少 pywebview（桌面窗口依赖）"
           }
 
       - name: Build installer
