@@ -53,3 +53,4 @@ try {
 } finally {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
 }
+exit 0
