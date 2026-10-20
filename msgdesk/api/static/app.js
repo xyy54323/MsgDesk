@@ -681,7 +681,7 @@ async function openMessage(id) {
         ? `<h3 class="section-title">详细摘要</h3><p>${esc(processing.summary_long)}</p>`
         : ''}
       <h3 class="section-title">原始内容</h3>
-      ${message.content_type === 'markdown'
+      ${['markdown', 'mixed'].includes(message.content_type)
         ? `<div class="md">${renderMarkdown(message.content_text || '')}</div>`
         : `<pre class="raw-text">${esc(message.content_text || '')}</pre>`}
     `);

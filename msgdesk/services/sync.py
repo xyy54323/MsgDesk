@@ -184,7 +184,9 @@ class SyncService:
                     )
                     if attachments:
                         text += "\n\n## 附件\n\n" + "\n".join(
-                            f"- [{name}]({url})" for name, url in attachments
+                            f"![图片]({url})" if kind == "image"
+                            else f"- [{name}]({url})"
+                            for name, url, kind in attachments
                         )
                         digest = content_hash(text)
                     raw_ref = self._write_raw(raw_dir, source_id, raw.raw_payload or {
@@ -314,7 +316,9 @@ class SyncService:
                 if not saved:
                     continue
                 updated = converted.content_text + "\n\n## 附件\n\n" + "\n".join(
-                    f"- [{name}]({url})" for name, url in saved
+                    f"![图片]({url})" if kind == "image"
+                    else f"- [{name}]({url})"
+                    for name, url, kind in saved
                 )
                 self.repo.update_message_fields(
                     message["id"],
@@ -374,9 +378,9 @@ class SyncService:
         raw: Any,
         source_id: str,
         warnings: list[str],
-    ) -> list[tuple[str, str]]:
+    ) -> list[tuple[str, str, str]]:
         """Download every attachment exposed by a source, regardless of type."""
-        saved: list[tuple[str, str]] = []
+        saved: list[tuple[str, str, str]] = []
         date_text = local_date_of(raw.published_at, self.config.system.timezone)
         root = self.config.data_dir / "attachments" / date_text
         for entry in getattr(raw, "attachments", []) or []:
@@ -384,6 +388,7 @@ class SyncService:
                 continue
             url = str(entry.get("url") or "").strip()
             name = str(entry.get("name") or "").strip()
+            kind = str(entry.get("type") or "").strip()
             if not url.startswith(("http://", "https://")):
                 continue
             if not name:
@@ -407,7 +412,7 @@ class SyncService:
             root.mkdir(parents=True, exist_ok=True)
             stored_name = f"{source_id[:8]}-{uuid.uuid4().hex[:8]}-{safe_name}"
             (root / stored_name).write_bytes(body)
-            saved.append((name, f"/attachments/{date_text}/{stored_name}"))
+            saved.append((name, f"/attachments/{date_text}/{stored_name}", kind))
         return saved
 
     @staticmethod
