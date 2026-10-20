@@ -260,6 +260,8 @@ class SyncService:
                     last_modified=next_cursor.last_modified,
                 )
         result.warnings.extend(warnings)
+        if is_qq:
+            self.backfill_qq_attachments(source_id)
         self.repo.mark_source_success(source_id)
         return {
             "trace_id": trace_id,
@@ -269,6 +271,82 @@ class SyncService:
             "warnings": result.warnings,
             "partial": result.partial,
         }
+
+    def backfill_qq_attachments(self, source_id: str) -> int:
+        """Add attachment links to old QQ messages that predate this feature."""
+        from ..adapters.qq_onebot import QQOneBotAdapter
+
+        source_row = self.repo.get_source(source_id)
+        if source_row is None:
+            return 0
+        source = SourceContext(
+            id=source_row["id"],
+            type=source_row["type"],
+            name=source_row["name"],
+            config=loads(source_row.get("config_json"), {}) or {},
+        )
+        adapter = QQOneBotAdapter()
+        changed = 0
+        slices: set[tuple[str, str]] = set()
+        try:
+            for message in self.repo.list_messages(limit=1000, source_id=source_id):
+                content = str(message.get("content_text") or "")
+                if "## 附件" in content or "/attachments/" in content:
+                    continue
+                raw_ref = str(message.get("raw_payload_ref") or "").strip()
+                if not raw_ref:
+                    continue
+                try:
+                    record = json.loads(Path(raw_ref).read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                payload = record.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                converted = adapter._convert(
+                    payload,
+                    str(message.get("conversation_id") or ""),
+                    source,
+                )
+                if converted is None or not converted.attachments:
+                    continue
+                saved = self._download_attachments(converted, source_id, [])
+                if not saved:
+                    continue
+                updated = converted.content_text + "\n\n## 附件\n\n" + "\n".join(
+                    f"- [{name}]({url})" for name, url in saved
+                )
+                self.repo.update_message_fields(
+                    message["id"],
+                    {
+                        "content_text": updated,
+                        "content_hash": content_hash(updated),
+                    },
+                )
+                slices.add((
+                    str(message.get("conversation_id") or ""),
+                    local_date_of(converted.published_at, self.config.system.timezone),
+                ))
+                changed += 1
+        finally:
+            adapter.close()
+        for conversation_id, date_text in sorted(slices):
+            if not conversation_id:
+                continue
+            if self.repo.open_job_exists(
+                "summarize_conversation",
+                source_id,
+                conversation_id=conversation_id,
+                date=date_text,
+            ):
+                continue
+            self.repo.enqueue_job(
+                "summarize_conversation",
+                source_id=source_id,
+                payload={"conversation_id": conversation_id, "date": date_text},
+                priority=90,
+            )
+        return changed
 
     def _history_range(self) -> tuple[datetime, datetime] | None:
         """Return the global collection window as timezone-aware datetimes."""

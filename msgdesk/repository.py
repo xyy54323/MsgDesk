@@ -539,7 +539,7 @@ class Repository:
             )
 
     def update_message_fields(self, message_id: str, data: dict[str, Any]) -> None:
-        allowed = {"processing_status", "content_text", "content_type"}
+        allowed = {"processing_status", "content_text", "content_type", "content_hash"}
         sets = [f"{k} = ?" for k in data if k in allowed]
         values = [v for k, v in data.items() if k in allowed]
         if not sets:
