@@ -28,6 +28,7 @@ from ..config import (
 from ..errors import AppError
 from ..repository import loads
 from ..runtime import Runtime
+from ..services import autostart
 from ..services.model import ModelInput as ModelInputType, create_model_provider
 from ..timeutil import iso_utc, local_date_of, local_zone, parse_datetime, utc_now
 
@@ -112,12 +113,19 @@ class ApiRouter:
                     "start": start,
                     "end": config.date_range.end,
                     "effective_end": effective_end,
-                }
+                },
+                "digest_time": config.scheduling.digest_time,
+                "autostart": bool(config.system.autostart),
+                "autostart_active": autostart.is_enabled(),
             }
 
         if path == "/api/range" and method in ("POST", "PUT"):
             start = str(body.get("start") or "").strip()
             end = str(body.get("end") or "").strip()
+            digest_time = str(
+                body.get("digest_time") or config.scheduling.digest_time
+            ).strip()
+            autostart_enabled = body.get("autostart")
             if not start:
                 raise AppError("VALIDATION_ERROR", "起始日期必填")
             try:
@@ -127,21 +135,51 @@ class ApiRouter:
                 raise AppError("VALIDATION_ERROR", "日期必须使用 YYYY-MM-DD 格式") from None
             if end_date is not None and end_date < start_date:
                 raise AppError("VALIDATION_ERROR", "结束日期不能早于起始日期")
+            try:
+                datetime.strptime(digest_time, "%H:%M")
+            except ValueError:
+                raise AppError("VALIDATION_ERROR", "日报时间必须使用 HH:MM 格式") from None
             if not config.config_path:
                 raise AppError("CONFIG_INVALID", "没有配置文件，无法保存时间范围")
+            updates: dict[str, Any] = {
+                "range": {"start": start, "end": end},
+                "scheduling": {"digest_time": digest_time},
+            }
+            if autostart_enabled is not None:
+                updates["system"] = {"autostart": bool(autostart_enabled)}
             merge_config_file(
                 config.config_path,
-                {"range": {"start": start, "end": end}},
+                updates,
             )
             config.date_range.start = start
             config.date_range.end = end
-            repo.audit("range.update", "range", None, {"start": start, "end": end})
+            config.scheduling.digest_time = digest_time
+            autostart_active = autostart.is_enabled()
+            if autostart_enabled is not None:
+                config.system.autostart = bool(autostart_enabled)
+                autostart_active = autostart.apply(
+                    bool(autostart_enabled), config.config_path
+                )
+            repo.audit(
+                "range.update",
+                "range",
+                None,
+                {
+                    "start": start,
+                    "end": end,
+                    "digest_time": digest_time,
+                    "autostart": config.system.autostart,
+                },
+            )
             return 200, {
                 "range": {
                     "start": start,
                     "end": end,
                     "effective_end": config.effective_range()[1],
-                }
+                },
+                "digest_time": digest_time,
+                "autostart": bool(config.system.autostart),
+                "autostart_active": autostart_active,
             }
 
         if method == "GET" and path == "/api/status":

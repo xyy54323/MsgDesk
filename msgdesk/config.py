@@ -38,6 +38,7 @@ class SystemConfig:
     bind_host: str = "127.0.0.1"
     port: int = 8080
     log_level: str = "INFO"
+    autostart: bool = False
 
 
 @dataclass
@@ -150,6 +151,7 @@ class AppConfig:
                 "digest_dir": str(self.digest_dir),
                 "bind_host": self.system.bind_host,
                 "port": self.system.port,
+                "autostart": self.system.autostart,
             },
             "scheduling": {
                 "default_interval_minutes": self.scheduling.default_interval_minutes,

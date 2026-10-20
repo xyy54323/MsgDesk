@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from msgdesk.api.server import ApiServer
 from msgdesk.config import load_config
@@ -180,25 +181,50 @@ class UiApiTests(unittest.TestCase):
             root = Path(tmp)
             runtime, server, base, _ = self._start(root)
             try:
-                status, payload = _request(
-                    base,
-                    "POST",
-                    "/api/range",
-                    {"start": "2026-09-01", "end": ""},
-                )
+                with mock.patch(
+                    "msgdesk.api.routes.autostart.apply", return_value=True
+                ), mock.patch(
+                    "msgdesk.api.routes.autostart.is_enabled", return_value=False
+                ):
+                    status, payload = _request(
+                        base,
+                        "POST",
+                        "/api/range",
+                        {
+                            "start": "2026-09-01",
+                            "end": "",
+                            "digest_time": "21:30",
+                            "autostart": True,
+                        },
+                    )
                 self.assertEqual(status, 200)
                 self.assertEqual(payload["range"]["start"], "2026-09-01")
                 self.assertEqual(payload["range"]["end"], "")
                 self.assertTrue(payload["range"]["effective_end"])
+                self.assertEqual(payload["digest_time"], "21:30")
+                self.assertTrue(payload["autostart"])
+                self.assertTrue(payload["autostart_active"])
                 saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
                 self.assertEqual(saved["range"]["start"], "2026-09-01")
                 self.assertEqual(saved["range"]["end"], "")
+                self.assertEqual(saved["scheduling"]["digest_time"], "21:30")
+                self.assertTrue(saved["system"]["autostart"])
+                self.assertEqual(runtime.config.scheduling.digest_time, "21:30")
 
                 status, error = _request(
                     base,
                     "POST",
                     "/api/range",
                     {"start": "2026-10-02", "end": "2026-10-01"},
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(error["code"], "VALIDATION_ERROR")
+
+                status, error = _request(
+                    base,
+                    "POST",
+                    "/api/range",
+                    {"start": "2026-09-01", "end": "", "digest_time": "25:00"},
                 )
                 self.assertEqual(status, 400)
                 self.assertEqual(error["code"], "VALIDATION_ERROR")

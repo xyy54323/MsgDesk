@@ -2257,16 +2257,24 @@ async function loadRange() {
   const end = document.getElementById('rangeEnd');
   if (start) start.value = range.start || '';
   if (end) end.value = range.end || '';
+  const digestTime = document.getElementById('digestTime');
+  if (digestTime) digestTime.value = result.data.digest_time || '22:00';
+  const autostart = document.getElementById('autostartEnabled');
+  if (autostart) autostart.checked = Boolean(result.data.autostart);
   if (status) {
-    status.textContent = range.effective_end
-      ? `当前日报截止：${range.effective_end}`
-      : '';
+    const parts = [];
+    if (range.effective_end) parts.push(`当前日报截止：${range.effective_end}`);
+    if (result.data.digest_time) parts.push(`每日 ${result.data.digest_time} 生成日报`);
+    parts.push(result.data.autostart_active ? '开机自启已生效' : '未开启开机自启');
+    status.textContent = parts.join(' · ');
   }
 }
 
 async function saveRange() {
   const start = document.getElementById('rangeStart')?.value.trim() || '';
   const end = document.getElementById('rangeEnd')?.value.trim() || '';
+  const digestTime = document.getElementById('digestTime')?.value || '22:00';
+  const autostart = Boolean(document.getElementById('autostartEnabled')?.checked);
   const status = document.getElementById('rangeStatus');
   if (!start) {
     toast('请选择起始日期', true);
@@ -2275,12 +2283,15 @@ async function saveRange() {
   try {
     const result = await api('/api/range', {
       method: 'POST',
-      body: JSON.stringify({ start, end })
+      body: JSON.stringify({ start, end, digest_time: digestTime, autostart })
     });
     if (status) {
-      status.textContent = `已保存，当前日报截止：${result.range.effective_end}`;
+      const parts = [`已保存，当前日报截止：${result.range.effective_end}`];
+      parts.push(`每日 ${result.digest_time} 生成日报`);
+      parts.push(result.autostart_active ? '开机自启已生效' : '未开启开机自启');
+      status.textContent = parts.join(' · ');
     }
-    toast('时间范围已保存');
+    toast('基础配置已保存');
     refreshStatus();
   } catch (error) {
     if (status) status.textContent = `保存失败：${error.message}`;

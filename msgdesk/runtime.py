@@ -80,6 +80,12 @@ class Runtime:
         )
         backfill.start()
         self._threads.append(backfill)
+        try:
+            from .services import autostart
+
+            autostart.sync(self.config)
+        except Exception:  # noqa: BLE001 - startup must never fail on this
+            log.warning("autostart sync failed", exc_info=True)
         log.info("runtime started with %s workers", count)
 
     def _seed_legacy_range(self) -> None:

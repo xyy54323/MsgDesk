@@ -142,8 +142,18 @@
               </span>
             </label>
           </div>
+          <div class="form-grid" style="margin-top:14px">
+            <label class="field">
+              <span class="field-title">日报生成时间</span>
+              <input id="digestTime" type="time" step="60" placeholder="22:00">
+            </label>
+            <label class="field">
+              <span class="field-title">开机自启动</span>
+              <label class="check"><input type="checkbox" id="autostartEnabled"> 开机后自动运行并在后台采集</label>
+            </label>
+          </div>
           <div class="row" style="margin-top:16px;gap:10px;align-items:center">
-            <button class="btn primary" onclick="saveRange()">保存时间范围</button>
+            <button class="btn primary" onclick="saveRange()">保存基础配置</button>
             <span class="muted tiny" id="rangeStatus"></span>
           </div>
         </div>
