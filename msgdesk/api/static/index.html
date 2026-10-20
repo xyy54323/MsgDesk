@@ -126,30 +126,30 @@
             <span>全局采集和日报时间范围。结束日期留空表示跟随今天。</span>
           </div>
           <div class="form-grid">
-            <label class="field">
+            <div class="field">
               <span class="field-title">起始日期<span class="required">*</span></span>
               <span class="date-row">
                 <input id="rangeStart" readonly placeholder="YYYY-MM-DD" onclick="pickRangeStart()">
                 <button type="button" class="btn tiny" onclick="pickRangeStart()">选择</button>
               </span>
-            </label>
-            <label class="field">
+            </div>
+            <div class="field">
               <span class="field-title">结束日期</span>
               <span class="date-row">
                 <input id="rangeEnd" readonly placeholder="跟随今天" onclick="pickRangeEnd()">
                 <button type="button" class="btn tiny" onclick="pickRangeEnd()">选择</button>
                 <button type="button" class="btn tiny" onclick="clearRangeEnd()" title="结束日期跟随今天">今天</button>
               </span>
-            </label>
+            </div>
           </div>
           <div class="form-grid" style="margin-top:14px">
-            <label class="field">
+            <div class="field">
               <span class="field-title">日报生成时间</span>
               <span class="date-row">
                 <input id="digestTime" readonly placeholder="22:00" onclick="pickDigestTime()">
                 <button type="button" class="btn tiny" onclick="pickDigestTime()">选择</button>
               </span>
-            </label>
+            </div>
             <label class="field">
               <span class="field-title">开机自启动</span>
               <label class="check"><input type="checkbox" id="autostartEnabled"> 开机后自动运行并在后台采集</label>
