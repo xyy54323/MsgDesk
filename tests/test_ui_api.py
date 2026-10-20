@@ -57,16 +57,16 @@ class UiApiTests(unittest.TestCase):
         config_path.write_text(
             json.dumps(
                 {
-                    "system": {"data_dir": "./data", "digest_dir": "./digests",
-                               "require_auth": False},
-                    "model": {"provider": "rules"},
-                    "notifications": {"channels": []},
+                    "system": {
+                        "data_dir": "./data",
+                        "digest_dir": "./digests",
+                    },
+                    "model": {"provider": ""},
                 }
             ),
             encoding="utf-8",
         )
         config = load_config(config_path)
-        config.system.require_auth = False
         runtime = Runtime(config)
         server = ApiServer(("127.0.0.1", 0), runtime)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -74,10 +74,10 @@ class UiApiTests(unittest.TestCase):
         base = f"http://127.0.0.1:{server.server_address[1]}"
         source = runtime.repo.create_source(
             {
-                "type": "mock_chat",
+                "type": "ai_web",
                 "name": "测试来源",
-                "adapter_type": "mock_chat",
-                "config": {"messages": []},
+                "adapter_type": "ai_web",
+                "config": {"url": "https://example.com/page"},
             }
         )
         return runtime, server, base, source["id"]
@@ -117,13 +117,6 @@ class UiApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual([m["id"] for m in result["messages"]], [first])
 
-                runtime.repo.reserve_notification(
-                    message_id=first,
-                    digest_date=None,
-                    channel="mock",
-                    dedupe_key=f"message:{first}",
-                    payload={},
-                )
                 status, result = _request(
                     base, "DELETE", f"/api/messages/{first}?purge=false"
                 )
@@ -139,7 +132,6 @@ class UiApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertTrue(result["purged"])
                 self.assertIsNone(runtime.repo.get_message(first))
-                self.assertEqual(runtime.repo.list_notifications(), [])
 
                 status, result = _request(
                     base,
@@ -154,13 +146,14 @@ class UiApiTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+                runtime.stop()
 
     def test_profile_round_trip(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             runtime, server, base, _ = self._start(root)
             try:
-                status, payload = _request(base, "POST", "/api/profile", {
+                status, _ = _request(base, "POST", "/api/profile", {
                     "profile": {
                         "identity": "2026 级研究生",
                         "interests": "奖学金、比赛",
@@ -177,6 +170,38 @@ class UiApiTests(unittest.TestCase):
                 self.assertEqual(profile["ignore"], "行政报送")
                 saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
                 self.assertEqual(saved["profile"]["todo_rule"], "只算需要我本人提交的事")
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_range_round_trip(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, server, base, _ = self._start(root)
+            try:
+                status, payload = _request(
+                    base,
+                    "POST",
+                    "/api/range",
+                    {"start": "2026-09-01", "end": ""},
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["range"]["start"], "2026-09-01")
+                self.assertEqual(payload["range"]["end"], "")
+                self.assertTrue(payload["range"]["effective_end"])
+                saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["range"]["start"], "2026-09-01")
+                self.assertEqual(saved["range"]["end"], "")
+
+                status, error = _request(
+                    base,
+                    "POST",
+                    "/api/range",
+                    {"start": "2026-10-02", "end": "2026-10-01"},
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(error["code"], "VALIDATION_ERROR")
             finally:
                 server.shutdown()
                 server.server_close()
@@ -271,84 +296,20 @@ class UiApiTests(unittest.TestCase):
                 server.server_close()
                 runtime.stop()
 
-    def test_notification_channel_and_settings(self):
+    def test_removed_non_mvp_routes_return_404(self):
         with TemporaryDirectory() as tmp:
             runtime, server, base, _ = self._start(Path(tmp))
             try:
-                status, created = _request(
-                    base,
-                    "POST",
+                for path in (
+                    "/api/notifications",
                     "/api/notification-channels",
-                    {
-                        "id": "phone",
-                        "type": "pushplus",
-                        "enabled": True,
-                        "config": {"token": "token-abc", "min_priority": "normal"},
-                    },
-                )
-                self.assertEqual(status, 200)
-                self.assertNotIn("token-abc", json.dumps(created))
-
-                _, listed = _request(base, "GET", "/api/notification-channels")
-                channel = next(c for c in listed["channels"] if c["id"] == "phone")
-                self.assertEqual(channel["config"]["token"], "***")
-
-                status, _ = _request(
-                    base,
-                    "POST",
-                    "/api/notification-channels",
-                    {
-                        "id": "phone",
-                        "type": "pushplus",
-                        "config": {
-                            "token": "***",
-                            "min_priority": "urgent",
-                            "notify_digest": True,
-                        },
-                    },
-                )
-                self.assertEqual(status, 200)
-                stored = next(
-                    c for c in runtime.config.notifications.channels if c.id == "phone"
-                )
-                self.assertEqual(stored.config["token"], "token-abc")
-                self.assertEqual(stored.config["min_priority"], "urgent")
-                self.assertTrue(stored.config["notify_digest"])
-
-                status, settings = _request(
-                    base,
-                    "POST",
-                    "/api/notifications/settings",
-                    {
-                        "min_priority": "normal",
-                        "hourly_limit": 3,
-                        "quiet_hours": {
-                            "start": "22:30",
-                            "end": "06:30",
-                            "allow_urgent": False,
-                        },
-                    },
-                )
-                self.assertEqual(status, 200)
-                self.assertEqual(settings["hourly_limit"], 3)
-                self.assertFalse(settings["quiet_hours"]["allow_urgent"])
-
-                raw = json.loads(
-                    (Path(tmp) / "config.json").read_text(encoding="utf-8")
-                )
-                self.assertEqual(raw["notifications"]["channels"][0]["config"]["token"],
-                                 "token-abc")
-                self.assertEqual(raw["notifications"]["hourly_limit"], 3)
-                self.assertEqual(raw["scheduling"]["quiet_hours"]["start"], "22:30")
-
-                status, error = _request(
-                    base,
-                    "POST",
-                    "/api/notifications/settings",
-                    {"quiet_hours": {"start": "25:00"}},
-                )
-                self.assertEqual(status, 400)
-                self.assertEqual(error["code"], "VALIDATION_ERROR")
+                    "/api/rules",
+                    "/api/jobs",
+                    "/api/traces",
+                ):
+                    status, payload = _request(base, "GET", path)
+                    self.assertEqual(status, 404)
+                    self.assertEqual(payload["code"], "NOT_FOUND")
             finally:
                 server.shutdown()
                 server.server_close()

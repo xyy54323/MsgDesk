@@ -1,2 +1,2 @@
-"""Business services for sync, processing, digest and notifications."""
+"""Business services for sync, processing and digests."""
 

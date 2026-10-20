@@ -39,6 +39,7 @@ QR_TTL = 120
 QR_REFRESH_AHEAD = 35
 QR_GRACE = 20  # tolerate clock/file-write jitter when deciding to serve the file
 AUTO_REFRESH_GAP = 8
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 HTTP_CONFIG = {
     "name": "msgdesk",
@@ -108,6 +109,7 @@ def _pids(refresh: bool = False) -> list[int]:
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", script],
             capture_output=True, text=True, timeout=20,
+            creationflags=NO_WINDOW,
         )
         pids = [int(item) for item in result.stdout.split() if item.strip().isdigit()]
     except (OSError, subprocess.SubprocessError):
@@ -338,7 +340,7 @@ def start(uin: str | None = None) -> None:
         cwd=str(VENDOR),
         stdout=open(LOG_DIR / "napcat.log", "a", encoding="utf-8"),
         stderr=open(LOG_DIR / "napcat.err.log", "a", encoding="utf-8"),
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        creationflags=NO_WINDOW,
     )
     _pid_cache.update(at=0.0, pids=[])
     _port_cache.update(at=0.0, port=None)
@@ -346,7 +348,11 @@ def start(uin: str | None = None) -> None:
 
 def stop() -> None:
     for pid in _pids(refresh=True):
-        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F"],
+            capture_output=True,
+            creationflags=NO_WINDOW,
+        )
     _pid_cache.update(at=0.0, pids=[])
     _port_cache.update(at=0.0, port=None)
 

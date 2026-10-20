@@ -49,7 +49,7 @@ def local_zone(name: str) -> tzinfo:
         return ZoneInfo(name)
     except Exception:
         # The embedded Python distribution may not ship the IANA database.
-        # Keep the workbench usable on those installs; other zones should
+        # Keep the app usable on those installs; other zones should
         # install the ``tzdata`` package for correct DST handling.
         offset = _FALLBACK_OFFSETS.get(name)
         if offset is None:

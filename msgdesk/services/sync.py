@@ -38,10 +38,11 @@ class SyncService:
             type=source_row["type"],
             name=source_row["name"],
             config=config,
-            backfill_since=source_row.get("backfill_since"),
+            backfill_since=self.config.date_range.start.strip() or source_row.get("backfill_since"),
         )
         trace_id = str(uuid.uuid4())
-        history_range = self._history_range(config)
+        history_range = self._history_range()
+        range_start, range_end = self.config.effective_range()
         if source_row["adapter_type"] == "ai_web":
             from .agent import AgentCollector
 
@@ -55,9 +56,7 @@ class SyncService:
                     cfg["cookie_invalid"] = False
                     self.repo.update_source(source_id, {"config": cfg})
 
-                collector = AgentCollector(
-                    self.config, trace=self.repo.add_trace, on_cookies=save_cookies
-                )
+                collector = AgentCollector(self.config, on_cookies=save_cookies)
                 try:
                     result = collector.collect(source)
                 finally:
@@ -100,7 +99,7 @@ class SyncService:
                 adapter.close()
 
         stats = {"fetched": len(result.messages), "inserted": 0, "duplicated": 0,
-                 "merged": 0, "failed": 0}
+                 "merged": 0, "failed": 0, "filtered": 0}
         raw_dir = self._raw_dir()
         now = iso_utc()
         qq_slices: set[tuple[str, str]] = set()
@@ -111,6 +110,14 @@ class SyncService:
                     text = clean_text(raw.content_text)
                     if not text:
                         stats["failed"] += 1
+                        continue
+                    published_day = local_date_of(
+                        raw.published_at, self.config.system.timezone
+                    )
+                    if range_start and (
+                        published_day < range_start or published_day > range_end
+                    ):
+                        stats["filtered"] += 1
                         continue
                     conversation_id = self.repo.upsert_conversation(
                         conn, source_id, raw.conversation_id,
@@ -141,7 +148,7 @@ class SyncService:
                     if (
                         raw.source_url
                         and len(text) >= 40
-                        and source_row["type"] in ("rss", "web", "frontier")
+                        and source_row["type"] in ("web", "ai_web")
                     ):
                         cross = self.repo.find_recent_by_hash(
                             conn, digest,
@@ -228,11 +235,6 @@ class SyncService:
                     etag=next_cursor.etag,
                     last_modified=next_cursor.last_modified,
                 )
-        if history_range is not None and not result.partial:
-            config["history_imported_at"] = iso_utc()
-            config["history_imported_from"] = str(config.get("history_from") or "")
-            config["history_imported_to"] = str(config.get("history_to") or "")
-            self.repo.update_source(source_id, {"config": config})
         self.repo.mark_source_success(source_id)
         return {
             "trace_id": trace_id,
@@ -243,22 +245,10 @@ class SyncService:
             "partial": result.partial,
         }
 
-    def _history_range(self, config: dict[str, Any]) -> tuple[datetime, datetime] | None:
-        """One-off history import window configured on the QQ source."""
-        start_text = str(config.get("history_from") or "").strip()
-        end_text = str(config.get("history_to") or "").strip()
+    def _history_range(self) -> tuple[datetime, datetime] | None:
+        """Return the global collection window as timezone-aware datetimes."""
+        start_text, end_text = self.config.effective_range()
         if not start_text:
-            return None
-        if not end_text:
-            end_text = utc_now().astimezone(
-                local_zone(self.config.system.timezone)
-            ).date().isoformat()
-        config["history_to"] = end_text
-        if (
-            str(config.get("history_imported_at") or "").strip()
-            and str(config.get("history_imported_from") or "") == start_text
-            and str(config.get("history_imported_to") or "") == end_text
-        ):
             return None
         zone = local_zone(self.config.system.timezone)
         try:

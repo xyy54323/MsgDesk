@@ -5,13 +5,29 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field, is_dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .errors import AppError
 from .paths import app_root
+from .timeutil import local_date_of, utc_now
 
 PROJECT_ROOT = app_root()
+
+
+def system_timezone_name() -> str:
+    """Use the host clock's timezone instead of exposing it as a setting."""
+    local = datetime.now().astimezone()
+    key = getattr(local.tzinfo, "key", "")
+    if key:
+        return key
+    offset = local.utcoffset() or timedelta()
+    if offset == timedelta(hours=8):
+        return "Asia/Shanghai"
+    if offset == timedelta():
+        return "UTC"
+    return f"UTC{offset.total_seconds() / 3600:+g}"
 
 
 @dataclass
@@ -22,15 +38,6 @@ class SystemConfig:
     bind_host: str = "127.0.0.1"
     port: int = 8080
     log_level: str = "INFO"
-    api_token: str | None = None
-    require_auth: bool = True
-
-
-@dataclass
-class QuietHours:
-    start: str = "23:00"
-    end: str = "07:00"
-    allow_urgent: bool = True
 
 
 @dataclass
@@ -39,7 +46,14 @@ class SchedulingConfig:
     max_parallel_jobs: int = 3
     digest_time: str = "22:00"
     poll_seconds: float = 2.0
-    quiet_hours: QuietHours = field(default_factory=QuietHours)
+
+
+@dataclass
+class RangeConfig:
+    """Global collection and digest date window."""
+
+    start: str = ""
+    end: str = ""
 
 
 @dataclass
@@ -47,7 +61,7 @@ class ModelProviderConfig:
     """A user-configured remote model endpoint.
 
     This is deliberately separate from the active ``ModelConfig`` fields so
-    the workbench can maintain several providers without inventing a default
+    the frontend can maintain several providers without inventing a default
     one.  ``provider`` identifies the protocol implementation, not a fake
     local model.
     """
@@ -80,21 +94,6 @@ class ModelConfig(ModelProviderConfig):
 
 
 @dataclass
-class NotificationChannelConfig:
-    id: str
-    type: str
-    enabled: bool = True
-    config: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class NotificationConfig:
-    channels: list[NotificationChannelConfig] = field(default_factory=list)
-    min_priority: str = "high"
-    hourly_limit: int = 6
-
-
-@dataclass
 class ProfileConfig:
     """How the user wants the model to understand them."""
 
@@ -109,8 +108,8 @@ class ProfileConfig:
 class AppConfig:
     system: SystemConfig = field(default_factory=SystemConfig)
     scheduling: SchedulingConfig = field(default_factory=SchedulingConfig)
+    date_range: RangeConfig = field(default_factory=RangeConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
-    notifications: NotificationConfig = field(default_factory=NotificationConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
     config_path: Path | None = None
     base_dir: Path = PROJECT_ROOT
@@ -138,7 +137,6 @@ class AppConfig:
             self.data_dir,
             self.data_dir / "raw",
             self.data_dir / "logs",
-            self.data_dir / "notifications",
             self.digest_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
@@ -152,33 +150,25 @@ class AppConfig:
                 "digest_dir": str(self.digest_dir),
                 "bind_host": self.system.bind_host,
                 "port": self.system.port,
-                "require_auth": self.system.require_auth,
             },
             "scheduling": {
                 "default_interval_minutes": self.scheduling.default_interval_minutes,
                 "max_parallel_jobs": self.scheduling.max_parallel_jobs,
                 "digest_time": self.scheduling.digest_time,
-                "quiet_hours": {
-                    "start": self.scheduling.quiet_hours.start,
-                    "end": self.scheduling.quiet_hours.end,
-                    "allow_urgent": self.scheduling.quiet_hours.allow_urgent,
-                },
+            },
+            "range": {
+                "start": self.date_range.start,
+                "end": self.date_range.end,
+                "effective_end": self.effective_range()[1],
             },
             "model": model_public,
-            "notifications": {
-                "min_priority": self.notifications.min_priority,
-                "hourly_limit": self.notifications.hourly_limit,
-                "channels": [
-                    {
-                        "id": c.id,
-                        "type": c.type,
-                        "enabled": c.enabled,
-                        "config": _redact(c.config),
-                    }
-                    for c in self.notifications.channels
-                ],
-            },
         }
+
+    def effective_range(self) -> tuple[str, str]:
+        end = self.date_range.end.strip() or local_date_of(
+            utc_now().isoformat(), self.system.timezone
+        )
+        return self.date_range.start.strip(), end
 
 
 def _public_model_provider(provider: ModelProviderConfig) -> dict[str, Any]:
@@ -291,10 +281,6 @@ def redact_secrets(value: dict[str, Any], *, hide_url: bool = True) -> dict[str,
     }
 
 
-def _redact(value: dict[str, Any]) -> dict[str, Any]:
-    return redact_secrets(value)
-
-
 def _deep_merge(target: dict[str, Any], updates: dict[str, Any]) -> None:
     for key, value in updates.items():
         if (
@@ -366,10 +352,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         config.config_path = config_path
         config.base_dir = config_path.parent
         _merge_dataclass(config.system, raw.get("system", {}))
+        config.system.timezone = system_timezone_name()
         _merge_dataclass(config.scheduling, raw.get("scheduling", {}))
-        quiet = raw.get("scheduling", {}).get("quiet_hours")
-        if isinstance(quiet, dict):
-            _merge_dataclass(config.scheduling.quiet_hours, quiet)
+        _merge_dataclass(config.date_range, raw.get("range", {}))
         _merge_dataclass(config.profile, raw.get("profile", {}) if isinstance(raw.get("profile"), dict) else {})
         raw_model = raw.get("model", {})
         if not isinstance(raw_model, dict):
@@ -377,7 +362,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         # New format stores only real, user-configured providers.  The old
         # starter config used provider=rules/local-heuristics-v1; that is an
         # implementation fallback and must never appear as a configured
-        # provider in the workbench.
+        # provider in the frontend.
         provider_rows = raw_model.get("providers")
         if isinstance(provider_rows, list):
             config.model.providers = [
@@ -411,23 +396,6 @@ def load_config(path: str | Path | None = None) -> AppConfig:
                 config.model.providers = []
                 config.model.default_provider_id = ""
                 activate_model_provider(config.model, None)
-        _merge_dataclass(config.notifications, raw.get("notifications", {}))
-        channels = raw.get("notifications", {}).get("channels")
-        if isinstance(channels, list):
-            config.notifications.channels = [
-                NotificationChannelConfig(
-                    id=item.get("id", ""),
-                    type=item.get("type", ""),
-                    enabled=bool(item.get("enabled", True)),
-                    config=item.get("config", {}) or {},
-                )
-                for item in channels
-                if item.get("id") and item.get("type")
-            ]
-
-    env_token = os.environ.get("MSGDESK_API_TOKEN")
-    if env_token:
-        config.system.api_token = env_token
     config.ensure_dirs()
     return config
 

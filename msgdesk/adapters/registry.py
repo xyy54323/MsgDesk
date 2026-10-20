@@ -7,10 +7,7 @@ from typing import Any
 from ..errors import AppError
 from ..models import AdapterCapabilities
 from .base import Fetcher, SourceAdapter
-from .chat_import import ChatImportAdapter
-from .mock_chat import MockChatAdapter, PendingChatAdapter
 from .qq_onebot import QQOneBotAdapter
-from .rss import RSSAdapter
 from .web import WebAdapter
 
 
@@ -20,24 +17,10 @@ class AIWebAdapter(WebAdapter):
     adapter_type = "ai_web"
 
 
-def _pending(platform: str):
-    return type(
-        f"Pending{platform.title()}Adapter",
-        (PendingChatAdapter,),
-        {"adapter_type": platform, "platform": platform},
-    )
-
-
 ADAPTERS: dict[str, type] = {
-    "rss": RSSAdapter,
     "web": WebAdapter,
     "ai_web": AIWebAdapter,
-    "mock_chat": MockChatAdapter,
     "qq_onebot": QQOneBotAdapter,
-    "chat_import": ChatImportAdapter,
-    "qq": _pending("qq"),
-    "wechat": _pending("wechat"),
-    "wecom": _pending("wecom"),
 }
 
 

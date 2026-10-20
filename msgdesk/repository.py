@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 import uuid
 from datetime import timedelta
 from typing import Any, Iterable
@@ -37,26 +36,6 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
 class Repository:
     def __init__(self, db: Database):
         self.db = db
-        # Trace attribution must be per worker thread: the same repository is
-        # shared by every worker and a plain attribute would let one job's
-        # traces land under another job's source.
-        self._trace_local = threading.local()
-
-    @property
-    def current_job_id(self) -> str | None:
-        return getattr(self._trace_local, "job_id", None)
-
-    @current_job_id.setter
-    def current_job_id(self, value: str | None) -> None:
-        self._trace_local.job_id = value
-
-    @property
-    def current_source_id(self) -> str | None:
-        return getattr(self._trace_local, "source_id", None)
-
-    @current_source_id.setter
-    def current_source_id(self, value: str | None) -> None:
-        self._trace_local.source_id = value
 
     # Sources -------------------------------------------------------------
     def list_sources(self, include_deleted: bool = False) -> list[dict[str, Any]]:
@@ -814,6 +793,18 @@ class Repository:
             result["status"] = "running"
             return result
 
+    def recover_interrupted_jobs(self) -> int:
+        """Put jobs left running by a previous process back into the queue."""
+        now = iso_utc()
+        with self.db.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE jobs SET status = 'retry_waiting', error_code = 'INTERRUPTED', "
+                "error_message = '上次运行被中断', available_at = ?, updated_at = ? "
+                "WHERE status = 'running'",
+                (now, now),
+            )
+            return cursor.rowcount or 0
+
     def finish_job(self, job_id: str, *, error_code: str | None = None,
                    error_message: str | None = None, retryable: bool = True) -> None:
         now = iso_utc()
@@ -928,160 +919,6 @@ class Repository:
                 )
             ]
 
-    # Notifications -------------------------------------------------------
-    def reserve_notification(
-        self,
-        *,
-        message_id: str | None,
-        digest_date: str | None,
-        channel: str,
-        dedupe_key: str,
-        payload: dict[str, Any],
-    ) -> str | None:
-        """Return a new record id, or None when the key was already used."""
-        record_id = new_id()
-        now = iso_utc()
-        with self.db.connection() as conn:
-            try:
-                conn.execute(
-                    "INSERT INTO notification_records(id, message_id, digest_date, channel, "
-                    "dedupe_key, payload_json, status, attempts, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)",
-                    (record_id, message_id, digest_date, channel, dedupe_key,
-                     dumps(payload), now, now),
-                )
-            except sqlite3.IntegrityError:
-                return None
-        return record_id
-
-    def update_notification(self, record_id: str, status: str, error_code: str | None = None) -> None:
-        now = iso_utc()
-        with self.db.connection() as conn:
-            conn.execute(
-                "UPDATE notification_records SET status = ?, attempts = attempts + 1, "
-                "sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END, error_code = ?, "
-                "updated_at = ? WHERE id = ?",
-                (status, status, now, error_code, now, record_id),
-            )
-
-    def notification_count_since(self, since_iso: str) -> int:
-        with self.db.connection() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM notification_records WHERE status = 'sent' "
-                "AND sent_at >= ?",
-                (since_iso,),
-            ).fetchone()
-            return int(row[0])
-
-    def list_notifications(self, limit: int = 50) -> list[dict[str, Any]]:
-        with self.db.connection() as conn:
-            return [
-                dict(r)
-                for r in conn.execute(
-                    "SELECT * FROM notification_records ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                )
-            ]
-
-    def latest_notification_by_channel(self) -> dict[str, dict[str, Any]]:
-        """Return the most recent notification record for each channel."""
-        with self.db.connection() as conn:
-            rows = conn.execute(
-                "SELECT r.* FROM notification_records r "
-                "WHERE r.rowid = ("
-                "  SELECT x.rowid FROM notification_records x "
-                "  WHERE x.channel = r.channel "
-                "  ORDER BY x.created_at DESC, x.rowid DESC LIMIT 1"
-                ")"
-            ).fetchall()
-        return {row["channel"]: dict(row) for row in rows}
-
-    # Rules ---------------------------------------------------------------
-    def list_rules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM rules"
-        if enabled_only:
-            sql += " WHERE enabled = 1"
-        sql += " ORDER BY priority, created_at"
-        with self.db.connection() as conn:
-            return [dict(r) for r in conn.execute(sql)]
-
-    def create_rule(self, data: dict[str, Any]) -> str:
-        rule_id = data.get("id") or new_id()
-        now = iso_utc()
-        with self.db.connection() as conn:
-            conn.execute(
-                "INSERT INTO rules(id, scope_type, scope_id, name, priority, enabled, "
-                "condition_json, action_json, version, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    rule_id,
-                    data.get("scope_type", "global"),
-                    data.get("scope_id"),
-                    data["name"],
-                    int(data.get("priority", 100)),
-                    1 if data.get("enabled", True) else 0,
-                    dumps(data.get("condition", {})),
-                    dumps(data.get("action", {})),
-                    int(data.get("version", 1)),
-                    now,
-                    now,
-                ),
-            )
-        return rule_id
-
-    def update_rule(self, rule_id: str, data: dict[str, Any]) -> None:
-        sets: list[str] = []
-        values: list[Any] = []
-        for key in ("name", "priority", "enabled", "scope_type", "scope_id", "version"):
-            if key in data:
-                value = data[key]
-                if key == "enabled":
-                    value = 1 if value else 0
-                sets.append(f"{key} = ?")
-                values.append(value)
-        for key, column in (("condition", "condition_json"), ("action", "action_json")):
-            if key in data:
-                sets.append(f"{column} = ?")
-                values.append(dumps(data[key]))
-        if not sets:
-            return
-        sets.append("updated_at = ?")
-        values.extend([iso_utc(), rule_id])
-        with self.db.connection() as conn:
-            conn.execute(f"UPDATE rules SET {', '.join(sets)} WHERE id = ?", values)
-
-    def delete_rule(self, rule_id: str) -> None:
-        with self.db.connection() as conn:
-            conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
-
-    # Accounts ------------------------------------------------------------
-    def list_accounts(self) -> list[dict[str, Any]]:
-        with self.db.connection() as conn:
-            return [dict(r) for r in conn.execute("SELECT * FROM accounts ORDER BY created_at")]
-
-    def create_account(self, data: dict[str, Any]) -> str:
-        account_id = data.get("id") or new_id()
-        now = iso_utc()
-        with self.db.connection() as conn:
-            conn.execute(
-                "INSERT INTO accounts(id, platform, display_name, session_ref, status, "
-                "capability_json, client_version, adapter_version, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    account_id,
-                    data["platform"],
-                    data["display_name"],
-                    data.get("session_ref"),
-                    data.get("status", "unknown"),
-                    dumps(data.get("capability", {})),
-                    data.get("client_version"),
-                    data.get("adapter_version"),
-                    now,
-                    now,
-                ),
-            )
-        return account_id
-
     # Stats / audit -------------------------------------------------------
     def stats(self) -> dict[str, Any]:
         with self.db.connection() as conn:
@@ -1118,9 +955,6 @@ class Repository:
                     "SELECT COUNT(*) FROM jobs WHERE status IN ('pending','retry_waiting')"
                 ),
                 "jobs_failed": scalar("SELECT COUNT(*) FROM jobs WHERE status = 'failed'"),
-                "notifications_sent": scalar(
-                    "SELECT COUNT(*) FROM notification_records WHERE status = 'sent'"
-                ),
             }
 
     def audit(self, action: str, target_type: str, target_id: str | None,
@@ -1151,61 +985,6 @@ class Repository:
                 "SELECT COUNT(*) FROM model_calls WHERE created_at >= ?", (since_iso,)
             ).fetchone()
             return int(row[0] or 0)
-
-    # Agent traces ------------------------------------------------------
-    def add_trace(self, kind: str, title: str, content: str,
-                  job_id: str | None = None) -> None:
-        """Store one line of the model conversation for the terminal view."""
-        job_id = job_id or getattr(self, "current_job_id", None)
-        source_id = getattr(self, "current_source_id", None)
-        with self.db.connection() as conn:
-            conn.execute(
-                "INSERT INTO agent_traces(id, job_id, source_id, kind, title, content, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (new_id(), job_id, source_id, kind, title[:200], content[:8000], iso_utc()),
-            )
-            conn.execute(
-                "DELETE FROM agent_traces WHERE id NOT IN ("
-                "SELECT id FROM agent_traces ORDER BY created_at DESC LIMIT 400)"
-            )
-
-    def list_traces(self, limit: int = 200, job_id: str | None = None,
-                    source_id: str | None = None,
-                    scope: str | None = None) -> list[dict[str, Any]]:
-        with self.db.connection() as conn:
-            if job_id:
-                rows = conn.execute(
-                    "SELECT * FROM agent_traces WHERE job_id = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (job_id, min(limit, 400)),
-                )
-            elif source_id:
-                rows = conn.execute(
-                    "SELECT * FROM agent_traces WHERE source_id = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (source_id, min(limit, 400)),
-                )
-            elif scope == "system":
-                rows = conn.execute(
-                    "SELECT * FROM agent_traces WHERE job_id IS NULL OR job_id IN "
-                    "(SELECT id FROM jobs WHERE source_id IS NULL) "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (min(limit, 400),),
-                )
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM agent_traces ORDER BY created_at DESC LIMIT ?",
-                    (min(limit, 400),),
-                )
-            return [dict(row) for row in rows][::-1]
-
-    def purge_traces_before(self, cutoff_iso: str) -> int:
-        with self.db.connection() as conn:
-            cursor = conn.execute(
-                "DELETE FROM agent_traces WHERE created_at < ?", (cutoff_iso,)
-            )
-            return cursor.rowcount or 0
-
 
 def _decode_processing(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:

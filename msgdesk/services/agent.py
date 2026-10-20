@@ -48,9 +48,8 @@ TOOL_SCHEMA = [
 
 
 class AgentCollector:
-    def __init__(self, config: Any, trace: Any = None, on_cookies: Any = None) -> None:
+    def __init__(self, config: Any, on_cookies: Any = None) -> None:
         self.config = config
-        self.trace = trace
         self.on_cookies = on_cookies
         self.fetcher = HttpFetcher()
         self.zone = local_zone(config.system.timezone)
@@ -73,9 +72,7 @@ class AgentCollector:
             self._context = self._browser.chromium.launch_persistent_context(
                 str(profile), headless=True
             )
-        except Exception as exc:  # noqa: BLE001 - fall back to plain HTTP
-            if self.trace:
-                self.trace("tool", "浏览器配置不可用", str(exc))
+        except Exception:  # noqa: BLE001 - fall back to plain HTTP
             self.close()
             self._context = None
         return self._context
@@ -120,8 +117,6 @@ class AgentCollector:
         model = self.config.model
         if not model.base_url or not model.model:
             raise AppError("CONFIG_INVALID", "模型 base_url 或 model 未配置")
-        if self.trace:
-            self.trace("prompt", f"→ {model.model}", _render_prompt(messages))
         payload: dict[str, Any] = {
             "model": model.model,
             "messages": messages,
@@ -156,18 +151,6 @@ class AgentCollector:
         if not choices:
             raise AppError("SCHEMA_INVALID", "模型未返回 choices")
         message = choices[0].get("message") or {}
-        if self.trace:
-            text = message.get("content") or ""
-            calls = message.get("tool_calls") or []
-            if calls:
-                names = ", ".join(
-                    (call.get("function") or {}).get("name", "") for call in calls
-                )
-                detail = "；".join(
-                    (call.get("function") or {}).get("arguments", "") for call in calls
-                )
-                text = f"[调用工具] {names} {detail}".strip()
-            self.trace("reply", f"← {model.model}", text or "（空回复）")
         return message
 
     # -- tool execution --------------------------------------------------
@@ -295,8 +278,6 @@ class AgentCollector:
                     result: Any = {"error": f"未知工具 {name}"}
                 else:
                     target = str(args.get("url") or "").strip()
-                    if self.trace:
-                        self.trace("tool", "抓取网页", target)
                     try:
                         result = self._fetch_page(target, headers)
                     except AppError as exc:
@@ -473,16 +454,3 @@ def _image_suffix(url: str, content_type: str) -> str:
     if suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
         return suffix
     return ".jpg"
-
-
-def _render_prompt(messages: list[dict[str, Any]]) -> str:
-    """Show the conversation part only; tool payloads stay out of the log."""
-    parts: list[str] = []
-    for item in messages:
-        role = item.get("role")
-        content = item.get("content")
-        if role == "system":
-            parts.append(f"[system]\n{str(content)[:800]}")
-        elif role == "user":
-            parts.append(f"[user]\n{str(content)[:900]}")
-    return "\n\n".join(parts)[-1800:]

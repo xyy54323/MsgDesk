@@ -13,7 +13,6 @@ from urllib.parse import urldefrag, urljoin, urlsplit
 from ..models import AdapterCapabilities, Cursor, FetchResult, RawMessage, ValidationResult
 from ..timeutil import iso_utc, parse_datetime
 from .base import BaseAdapter, FetchOptions, SourceContext
-from .rss import strip_html
 
 
 class _PageParser(HTMLParser):

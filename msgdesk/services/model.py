@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from typing import Any
 
 from ..config import ModelConfig
 from ..errors import AppError
-from ..timeutil import iso_utc, local_zone, parse_datetime, utc_now
-from .textmatch import has_keyword
+from ..timeutil import iso_utc, parse_datetime
 
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "学校通知": ["学校", "老师", "班主任", "家长", "班级", "教务", "辅导员", "学院", "课程安排",
@@ -30,17 +27,6 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
            "社区", "周末", "读书"],
     "待办": ["待办", "记得", "务必", "尽快", "截止", "提交", "完成", "处理", "回复"],
 }
-
-URGENT_WORDS = ["紧急", "立即", "马上", "今晚", "今天内", "尽快", "截止", "最后一天", "务必"]
-HIGH_WORDS = ["请", "需要", "报名", "提交", "确认", "参加"]
-ACTION_WORDS = ["请", "需", "务必", "记得", "提交", "完成", "报名", "参加", "确认", "回复"]
-
-DATE_RE = re.compile(
-    r"(?P<year>20\d{2})[-/年.](?P<month>\d{1,2})[-/月.](?P<day>\d{1,2})日?"
-    r"(?:\s*(?P<hour>\d{1,2})[:：](?P<minute>\d{2}))?"
-)
-REL_DATE_RE = re.compile(r"(今天|明天|后天)\s*(?:(上午|下午|晚上)?\s*(\d{1,2})[:：](\d{2}))?")
-
 
 @dataclass
 class ModelInput:
@@ -86,60 +72,6 @@ class UnconfiguredModel(ModelProvider):
 
     def analyze(self, message: ModelInput, context: dict[str, Any]) -> dict[str, Any]:
         raise AppError("CONFIG_INVALID", "尚未配置模型，请先添加模型服务商")
-
-
-class RuleBasedModel(ModelProvider):
-    name = "rules"
-    model_name = "local-heuristics-v1"
-
-    def __init__(self, zone_name: str = "Asia/Shanghai"):
-        self.zone_name = zone_name
-
-    def analyze(self, message: ModelInput, context: dict[str, Any]) -> dict[str, Any]:
-        text = message.text
-        lowered = text.lower()
-        scores = {
-            category: sum(1 for keyword in keywords if has_keyword(lowered, keyword))
-            for category, keywords in CATEGORY_KEYWORDS.items()
-        }
-        category = max(scores, key=scores.get) if max(scores.values()) > 0 else "其他"
-        tags = [keyword for keywords, name in ((v, k) for k, v in CATEGORY_KEYWORDS.items())
-                for keyword in keywords if has_keyword(lowered, keyword)][:6]
-        tags = list(dict.fromkeys(tags))
-
-        deadline = _extract_deadline(text, self.zone_name)
-        action_items = _extract_actions(text)
-        urgency = "normal"
-        if any(word in text for word in URGENT_WORDS):
-            urgency = "urgent"
-        elif deadline:
-            parsed = parse_datetime(deadline)
-            if parsed and parsed - utc_now() <= timedelta(hours=48):
-                urgency = "urgent"
-        priority = "normal"
-        if urgency == "urgent":
-            priority = "urgent"
-        elif action_items or any(word in text for word in HIGH_WORDS):
-            priority = "high"
-        if len(text) < 20 and category == "其他":
-            priority = "low"
-        if any(word in text for word in ("无需报名", "自愿参加", "可选")) and urgency != "urgent":
-            priority = "normal"
-
-        summary = _short_summary(text)
-        return {
-            "category": category,
-            "subcategory": None,
-            "tags": tags,
-            "summary_short": summary,
-            "summary_long": _long_summary(text),
-            "facts": _facts(text, deadline),
-            "action_items": action_items,
-            "deadline_at": deadline,
-            "priority": priority,
-            "urgency": urgency,
-            "confidence": 0.55 if category == "其他" else 0.72,
-        }
 
 
 class OpenAICompatibleModel(ModelProvider):
@@ -252,91 +184,12 @@ def validate_model_output(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def create_model_provider(config: ModelConfig, zone_name: str) -> ModelProvider:
+def create_model_provider(config: ModelConfig, zone_name: str = "Asia/Shanghai") -> ModelProvider:
     if config.provider in ("openai_compatible", "openai"):
         return OpenAICompatibleModel(config)
-    if not config.provider:
+    if config.provider in ("", "rules"):
         return UnconfiguredModel()
     raise AppError("CONFIG_INVALID", f"不支持的模型服务商: {config.provider}")
-
-
-def _short_summary(text: str) -> str:
-    first = re.split(r"(?<=[。！？!?\n])", text.strip(), maxsplit=1)[0].strip()
-    first = re.sub(r"\s+", " ", first)
-    if len(first) > 80:
-        first = first[:77] + "..."
-    return first or "（无文本）"
-
-
-def _long_summary(text: str) -> str:
-    compact = re.sub(r"\s+", " ", text).strip()
-    return compact[:500]
-
-
-def _extract_actions(text: str) -> list[str]:
-    sentences = re.split(r"(?<=[。！？!?\n])", text)
-    actions: list[str] = []
-    for sentence in sentences:
-        clean = re.sub(r"\s+", " ", sentence).strip(" -•\t")
-        if not clean or not (8 <= len(clean) <= 180):
-            continue
-        if clean.endswith("通知") and "请" not in clean and "务必" not in clean:
-            continue
-        if any(word in clean for word in ("无需报名", "自愿参加", "可选", "入口见", "详见", "见附件")):
-            continue
-        if "请" not in clean and any(word in clean for word in ("入口", "点击")):
-            continue
-        if not any(word in clean for word in ACTION_WORDS):
-            continue
-        if any(clean in existing or existing in clean for existing in actions):
-            continue
-        actions.append(clean)
-        if len(actions) >= 5:
-            break
-    return actions
-
-
-def _extract_deadline(text: str, zone_name: str) -> str | None:
-    zone = local_zone(zone_name)
-    match = DATE_RE.search(text)
-    if match:
-        year, month, day = int(match["year"]), int(match["month"]), int(match["day"])
-        hour = int(match["hour"]) if match["hour"] else 23
-        minute = int(match["minute"]) if match["minute"] else 59
-        try:
-            value = datetime(year, month, day, min(hour, 23), min(minute, 59), tzinfo=zone)
-            return iso_utc(value)
-        except ValueError:
-            return None
-    rel = REL_DATE_RE.search(text)
-    if rel:
-        offset = {"今天": 0, "明天": 1, "后天": 2}[rel.group(1)]
-        base = utc_now().astimezone(zone).replace(tzinfo=None) + timedelta(days=offset)
-        hour = int(rel.group(3)) if rel.group(3) else 23
-        minute = int(rel.group(4)) if rel.group(4) else 59
-        if rel.group(2) == "下午" and hour < 12:
-            hour += 12
-        if rel.group(2) == "晚上" and hour < 12:
-            hour += 12
-        value = base.replace(hour=min(hour, 23), minute=min(minute, 59), second=0,
-                             microsecond=0, tzinfo=zone)
-        return iso_utc(value)
-    return None
-
-
-def _facts(text: str, deadline: str | None) -> list[str]:
-    facts: list[str] = []
-    if deadline:
-        facts.append(f"截止时间：{deadline}")
-    urls = re.findall(r"https?://[^\s)）]+", text)
-    if urls:
-        facts.append(f"链接：{urls[0]}")
-    for line in text.splitlines():
-        if re.search(r"(地点|对象|时间|地址|要求)[：:]", line):
-            facts.append(line.strip()[:200])
-        if len(facts) >= 6:
-            break
-    return facts
 
 
 _VISION_CACHE: dict[str, bool] = {}

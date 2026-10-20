@@ -1,2 +1,2 @@
-"""Local HTTP API and workbench UI."""
+"""Local HTTP API and desktop UI."""
 

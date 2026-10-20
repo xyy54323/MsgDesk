@@ -6,12 +6,11 @@ import logging
 import threading
 from pathlib import Path
 
-from .config import AppConfig
+from .config import AppConfig, merge_config_file
 from .db import Database
-from .repository import Repository
+from .repository import Repository, loads
 from .services.digest import DigestService
 from .services.model import create_model_provider
-from .services.notifications import NotificationService
 from .services.processing import ProcessingService
 from .services.scheduler import Scheduler
 from .services.session_keeper import SessionKeeper
@@ -28,18 +27,18 @@ class Runtime:
         self.db = Database(config.db_path)
         self.db.migrate()
         self.repo = Repository(self.db)
+        self.repo.recover_interrupted_jobs()
+        self._seed_legacy_range()
         self.model = create_model_provider(config.model, config.system.timezone)
         self.sync_service = SyncService(config, self.repo)
         self.processing_service = ProcessingService(config, self.repo, self.model)
         self.digest_service = DigestService(config, self.repo)
-        self.notification_service = NotificationService(config, self.repo)
         self.conversation_digest_service = ConversationDigestService(config, self.repo)
         self.worker = Worker(
             self.repo,
             self.sync_service,
             self.processing_service,
             self.digest_service,
-            self.notification_service,
             self.conversation_digest_service,
         )
         self.scheduler = Scheduler(config, self.repo)
@@ -83,6 +82,25 @@ class Runtime:
         self._threads.append(backfill)
         log.info("runtime started with %s workers", count)
 
+    def _seed_legacy_range(self) -> None:
+        """Use the earliest old QQ history date as the first global start."""
+        if self.config.date_range.start:
+            return
+        starts = []
+        for source in self.repo.list_sources():
+            source_config = loads(source.get("config_json"), {}) or {}
+            value = str(source_config.get("history_from") or "").strip()
+            if value:
+                starts.append(value)
+        if not starts:
+            return
+        self.config.date_range.start = min(starts)
+        if self.config.config_path:
+            merge_config_file(
+                self.config.config_path,
+                {"range": {"start": self.config.date_range.start, "end": self.config.date_range.end}},
+            )
+
     def _generate_missing_digests(self) -> None:
         try:
             count = self.digest_service.generate_missing()
@@ -102,34 +120,8 @@ class Runtime:
         self.model = create_model_provider(self.config.model, self.config.system.timezone)
         self.processing_service.model = self.model
 
-    def apply_notification_config(self) -> None:
-        """Rebuild notification routing after channels or quiet hours change."""
-        self.notification_service = NotificationService(self.config, self.repo)
-        self.worker.notification_service = self.notification_service
-
     def drain(self, max_jobs: int = 200) -> int:
         processed = 0
         while processed < max_jobs and self.worker.run_once():
             processed += 1
         return processed
-
-    def ensure_api_token(self) -> str | None:
-        if not self.config.system.require_auth:
-            return None
-        if self.config.system.api_token:
-            return self.config.system.api_token
-        token_file = self.config.data_dir / "api_token.txt"
-        if token_file.exists():
-            token = token_file.read_text(encoding="utf-8").strip()
-        else:
-            import secrets
-
-            token = secrets.token_urlsafe(24)
-            token_file.write_text(token, encoding="utf-8")
-            try:
-                token_file.chmod(0o600)
-            except OSError:
-                pass
-        self.config.system.api_token = token
-        return token
-

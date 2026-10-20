@@ -11,7 +11,6 @@ from ..errors import AppError
 from ..repository import Repository, loads
 from .digest import DigestService
 from .conversation_digest import ConversationDigestService
-from .notifications import NotificationService
 from .processing import ProcessingService
 from .sync import SyncService
 
@@ -25,22 +24,18 @@ class Worker:
         sync_service: SyncService,
         processing_service: ProcessingService,
         digest_service: DigestService,
-        notification_service: NotificationService,
         conversation_digest_service: ConversationDigestService | None = None,
     ):
         self.repo = repo
         self.sync_service = sync_service
         self.processing_service = processing_service
         self.digest_service = digest_service
-        self.notification_service = notification_service
         self.conversation_digest_service = conversation_digest_service
 
     def run_once(self) -> bool:
         job = self.repo.claim_next_job()
         if job is None:
             return False
-        self.repo.current_job_id = job["id"]
-        self.repo.current_source_id = job.get("source_id")
         try:
             self.dispatch(job)
         except AppError as exc:
@@ -61,9 +56,6 @@ class Worker:
             )
         else:
             self.repo.finish_job(job["id"])
-        finally:
-            self.repo.current_job_id = None
-            self.repo.current_source_id = None
         return True
 
     def dispatch(self, job: dict[str, Any]) -> None:
@@ -101,15 +93,7 @@ class Worker:
                         priority=150,
                     )
         elif job_type == "generate_digest":
-            summary = self.digest_service.generate(payload.get("date"))
-            if payload.get("notify", True):
-                self.notification_service.notify_digest(summary["date"], summary)
-        elif job_type == "send_notification":
-            message_id = job.get("message_id") or payload.get("message_id")
-            channel = payload.get("channel")
-            if not message_id or not channel:
-                raise AppError("VALIDATION_ERROR", "send_notification 任务参数不完整")
-            self.notification_service.notify_message(message_id, channel)
+            self.digest_service.generate(payload.get("date"))
         else:
             raise AppError("VALIDATION_ERROR", f"未知任务类型: {job_type}")
 

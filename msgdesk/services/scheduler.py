@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from ..config import AppConfig
 from ..repository import Repository
-from ..timeutil import iso_utc, local_zone, parse_datetime, utc_now
+from ..timeutil import local_zone, parse_datetime, utc_now
 
 log = logging.getLogger("msgdesk.scheduler")
 
@@ -38,8 +38,6 @@ class Scheduler:
 
         local_now = now.astimezone(zone)
         today = local_now.date().isoformat()
-        midnight = datetime.combine(local_now.date(), time.min, tzinfo=zone)
-        self.repo.purge_traces_before(iso_utc(midnight))
         digest_time = self._parse_time(self.config.scheduling.digest_time)
         if digest_time and local_now.time() >= digest_time:
             existing = self.repo.get_digest(today)

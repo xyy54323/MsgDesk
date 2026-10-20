@@ -7,89 +7,29 @@
     "notes": ""
   },
   "system": {
-    "timezone": "Asia/Shanghai",
     "data_dir": "./data",
     "digest_dir": "./digests",
     "bind_host": "127.0.0.1",
     "port": 8080,
-    "log_level": "INFO",
-    "require_auth": true
+    "log_level": "INFO"
   },
   "scheduling": {
     "default_interval_minutes": 10,
     "max_parallel_jobs": 3,
-    "digest_time": "22:00",
-    "quiet_hours": {
-      "start": "23:00",
-      "end": "07:00",
-      "allow_urgent": true
-    }
+    "digest_time": "22:00"
+  },
+  "range": {
+    "start": "",
+    "end": ""
   },
   "model": {
-    "provider": "rules",
+    "provider": "",
     "base_url": "",
     "model": "",
     "api_key_env": "MSGDESK_MODEL_API_KEY",
     "timeout_seconds": 60,
     "max_input_chars": 6000,
     "daily_call_limit": 500
-  },
-  "notifications": {
-    "min_priority": "high",
-    "hourly_limit": 6,
-    "channels": [
-      {
-        "id": "local-file",
-        "type": "file",
-        "enabled": true,
-        "config": {
-          "notify_digest": true
-        }
-      },
-      {
-        "_comment": "PushPlus：config.token 必填；endpoint 可指向自建服务",
-        "id": "pushplus",
-        "type": "pushplus",
-        "enabled": false,
-        "config": {
-          "token": "替换为你的 PushPlus token",
-          "notify_digest": false,
-          "min_priority": "high"
-        }
-      },
-      {
-        "_comment": "Server酱：config.sendkey 必填",
-        "id": "serverchan",
-        "type": "serverchan",
-        "enabled": false,
-        "config": {
-          "sendkey": "替换为你的 SendKey",
-          "notify_digest": false
-        }
-      },
-      {
-        "_comment": "企业微信群机器人：config.webhook_url 必填（含 key，注意保密）",
-        "id": "wecom-bot",
-        "type": "wecom_bot",
-        "enabled": false,
-        "config": {
-          "webhook_url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=替换",
-          "notify_digest": false
-        }
-      },
-      {
-        "_comment": "Bark：config.device_key 必填；可选 group、endpoint",
-        "id": "bark-phone",
-        "type": "bark",
-        "enabled": false,
-        "config": {
-          "device_key": "替换为 Bark Device Key",
-          "group": "MsgDesk",
-          "notify_urgent_only": false,
-          "notify_digest": false
-        }
-      }
-    ]
   }
 }
 

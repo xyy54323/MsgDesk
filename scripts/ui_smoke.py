@@ -1,7 +1,7 @@
 """Manual Playwright smoke test for the local workbench.
 
 Usage:
-  python scripts/ui_smoke.py "http://127.0.0.1:8080/?token=..." --name "UI 测试源"
+  python scripts/ui_smoke.py "http://127.0.0.1:8080/" --name "UI 测试源"
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ def main() -> int:
     args = parser.parse_args()
 
     parsed = urllib.parse.urlparse(args.url)
-    token = urllib.parse.parse_qs(parsed.query).get("token", [""])[0]
     base = f"{parsed.scheme}://{parsed.netloc}"
 
     with sync_playwright() as playwright:
@@ -32,18 +31,17 @@ def main() -> int:
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
         page.goto(args.url + "#sources", wait_until="networkidle")
-        page.fill("input[name=name]", args.name)
-        page.fill("input[name=url]", "https://example.com/ui-feed.xml")
         page.click('button:has-text("添加来源")')
+        page.fill("#srcName", args.name)
+        page.fill("#cfgUrl", "https://example.com/ui-page")
+        page.click('button:has-text("保存来源")')
         page.wait_for_timeout(900)
         added = args.name in page.inner_text("body")
         page.screenshot(path=args.screenshot, full_page=True)
         browser.close()
 
     created = []
-    request = urllib.request.Request(
-        base + "/api/sources", headers={"X-API-Token": token}
-    )
+    request = urllib.request.Request(base + "/api/sources")
     with urllib.request.urlopen(request, timeout=5) as response:
         created = [
             source for source in json.loads(response.read())["sources"]
@@ -52,7 +50,6 @@ def main() -> int:
     for source in created:
         purge = urllib.request.Request(
             base + f"/api/sources/{source['id']}?purge=true",
-            headers={"X-API-Token": token},
             method="DELETE",
         )
         urllib.request.urlopen(purge, timeout=5).read()

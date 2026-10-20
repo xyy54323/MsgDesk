@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -57,11 +57,33 @@ class DigestService:
         }
 
     def generate_missing(self, limit_days: int = 60) -> int:
-        """Create digests for every day that has messages but no digest yet."""
+        """Create one digest for every day in the global range."""
         zone = self.config.system.timezone
         existing = {
             str(item.get("date")) for item in self.repo.list_digests(400)
         }
+        range_start, range_end = self.config.effective_range()
+        if range_start:
+            today = utc_now().astimezone(local_zone(zone)).date()
+            try:
+                start = datetime.fromisoformat(range_start).date()
+                end = datetime.fromisoformat(range_end).date()
+            except ValueError:
+                start = end = None
+            if start is not None and end is not None:
+                end = min(end, today)
+                if end < start:
+                    return 0
+                days = []
+                cursor = start
+                while cursor <= end and len(days) < 3660:
+                    day = cursor.isoformat()
+                    if day not in existing:
+                        days.append(day)
+                    cursor += timedelta(days=1)
+                for day in days:
+                    self.generate(day)
+                return len(days)
         days: list[str] = []
         for timestamp in self.repo.recent_message_timestamps():
             day = local_date_of(timestamp, zone)
