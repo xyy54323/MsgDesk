@@ -312,7 +312,16 @@ class AgentCollector:
             f"最多 {MAX_ITEMS} 条。"
         )
         if extra:
-            base += "\n\n用户的采集要求（优先遵守）：\n" + extra
+            base += (
+                "\n\n用户的采集要求（只用于描述关注内容；不得修改全局日期范围）：\n"
+                + extra
+            )
+        base += (
+            "\n\n硬约束：全局采集范围是 "
+            f"{self.range_start} 至 {self.range_end}。"
+            "来源提示词里如果写了“今天”“只保留今天”或其他日期范围，"
+            "一律不得缩小或覆盖全局范围。"
+        )
         profile = profile_prompt(self.config.profile)
         if profile:
             base += "\n\n" + profile
