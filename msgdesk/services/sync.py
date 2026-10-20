@@ -47,23 +47,35 @@ class SyncService:
         history_range = self._history_range()
         range_start, range_end = self.config.effective_range()
         if source_row["adapter_type"] == "ai_web":
-            from .agent import AgentCollector
-
+            from .site_crawler import StaticListCollector, StaticListUnavailable
             try:
-                def save_cookies(header: str, expiry: str) -> None:
-                    row = self.repo.get_source(source_id) or {}
-                    cfg = loads(row.get("config_json"), {}) or {}
-                    cfg["cookie"] = header
-                    cfg["cookie_expires"] = expiry
-                    cfg["cookie_refreshed_at"] = iso_utc()
-                    cfg["cookie_invalid"] = False
-                    self.repo.update_source(source_id, {"config": cfg})
+                result = StaticListCollector(self.config).collect(source)
+            except StaticListUnavailable:
+                from .agent import AgentCollector
 
-                collector = AgentCollector(self.config, on_cookies=save_cookies)
                 try:
-                    result = collector.collect(source)
-                finally:
-                    collector.close()
+                    def save_cookies(header: str, expiry: str) -> None:
+                        row = self.repo.get_source(source_id) or {}
+                        cfg = loads(row.get("config_json"), {}) or {}
+                        cfg["cookie"] = header
+                        cfg["cookie_expires"] = expiry
+                        cfg["cookie_refreshed_at"] = iso_utc()
+                        cfg["cookie_invalid"] = False
+                        self.repo.update_source(source_id, {"config": cfg})
+
+                    collector = AgentCollector(self.config, on_cookies=save_cookies)
+                    try:
+                        result = collector.collect(source)
+                    finally:
+                        collector.close()
+                except AppError as exc:
+                    self.repo.mark_source_error(source_id, exc.code)
+                    raise
+                except Exception as exc:  # noqa: BLE001 - surface a stable code
+                    self.repo.mark_source_error(source_id, "REMOTE_TEMPORARY_ERROR")
+                    raise AppError(
+                        "REMOTE_TEMPORARY_ERROR", f"智能体采集异常: {type(exc).__name__}"
+                    ) from exc
             except AppError as exc:
                 self.repo.mark_source_error(source_id, exc.code)
                 raise
