@@ -152,6 +152,7 @@ class StaticListCollector:
                     conversation_name=title,
                     conversation_kind="web",
                     published_at=iso_utc(published_at),
+                    published_time_known=False,
                     content_text=f"{title}\n\n{body}",
                     content_type="markdown",
                     source_url=target,

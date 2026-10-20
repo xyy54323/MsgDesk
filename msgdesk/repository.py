@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import timedelta
+from datetime import time, timedelta
 from typing import Any, Iterable
 
 from . import __version__
 from .db import Database
-from .timeutil import iso_utc, utc_now
+from .timeutil import iso_utc, local_zone, parse_datetime, utc_now
 
 
 def new_id() -> str:
@@ -281,9 +281,10 @@ class Repository:
         conn.execute(
             "INSERT INTO messages(id, source_id, account_id, conversation_id, sender_id, "
             "sender_name, platform_message_id, published_at, collected_at, content_type, "
-            "content_text, content_completeness, source_url, raw_payload_ref, content_hash, "
+            "content_text, content_completeness, published_time_known, source_url, "
+            "raw_payload_ref, content_hash, "
             "processing_status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 message_id,
                 data["source_id"],
@@ -297,6 +298,7 @@ class Repository:
                 data.get("content_type", "text"),
                 data.get("content_text"),
                 data.get("content_completeness", "complete"),
+                int(bool(data.get("published_time_known", True))),
                 data.get("source_url"),
                 data.get("raw_payload_ref"),
                 data["content_hash"],
@@ -309,6 +311,31 @@ class Repository:
             conn, message_id, data["source_id"], message_id, data.get("source_url")
         )
         return message_id
+
+    def backfill_unknown_published_times(self, zone_name: str) -> int:
+        """Mark legacy website messages stored at local midnight as date-only."""
+        zone = local_zone(zone_name)
+        with self.db.connection() as conn:
+            rows = conn.execute(
+                "SELECT m.id, m.published_at FROM messages m "
+                "JOIN sources s ON s.id = m.source_id "
+                "WHERE s.adapter_type IN ('web', 'ai_web') "
+                "AND m.published_time_known = 1"
+            ).fetchall()
+            ids = []
+            for row in rows:
+                parsed = parse_datetime(row["published_at"])
+                if parsed is None:
+                    continue
+                local = parsed.astimezone(zone)
+                if local.time().replace(microsecond=0) == time.min:
+                    ids.append((row["id"],))
+            if ids:
+                conn.executemany(
+                    "UPDATE messages SET published_time_known = 0 WHERE id = ?",
+                    ids,
+                )
+        return len(ids)
 
     def add_message_source(
         self,

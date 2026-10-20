@@ -1,0 +1,1 @@
+ALTER TABLE messages ADD COLUMN published_time_known INTEGER NOT NULL DEFAULT 1;

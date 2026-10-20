@@ -28,6 +28,7 @@ class Runtime:
         self.db = Database(config.db_path)
         self.db.migrate()
         self.repo = Repository(self.db)
+        self.repo.backfill_unknown_published_times(config.system.timezone)
         self.repo.recover_interrupted_jobs()
         self._seed_legacy_range()
         self.model = create_model_provider(config.model, config.system.timezone)

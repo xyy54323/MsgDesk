@@ -24,7 +24,7 @@ from msgdesk.services.processing import ProcessingService
 from msgdesk.services.agent import AgentCollector
 from msgdesk.services.sync import SyncService
 from msgdesk.services.worker import Worker
-from msgdesk.timeutil import iso_utc, local_date_of
+from msgdesk.timeutil import has_explicit_time, iso_utc, local_date_of
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PAGE_URL = "https://example.com/page"
@@ -111,9 +111,9 @@ class MigrationTests(unittest.TestCase):
     def test_migrations_are_idempotent_and_core_tables_exist(self):
         with TemporaryDirectory() as tmp:
             db = Database(Path(tmp) / "test.db")
-            self.assertEqual(db.migrate(), [1, 2, 3, 4, 5, 6, 7])
+            self.assertEqual(db.migrate(), [1, 2, 3, 4, 5, 6, 7, 8])
             self.assertEqual(db.migrate(), [])
-            self.assertEqual(db.schema_version(), 7)
+            self.assertEqual(db.schema_version(), 8)
             with db.connection() as conn:
                 tables = {
                     row[0]
@@ -126,6 +126,15 @@ class MigrationTests(unittest.TestCase):
                 "message_processing", "jobs", "digests",
             ):
                 self.assertIn(name, tables)
+            with db.connection() as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+            self.assertIn("published_time_known", columns)
+
+    def test_explicit_time_detection_distinguishes_date_only_values(self):
+        self.assertFalse(has_explicit_time("2026-10-20"))
+        self.assertFalse(has_explicit_time("2026/10/20"))
+        self.assertTrue(has_explicit_time("2026-10-20 08:30:00"))
+        self.assertTrue(has_explicit_time("2026-10-20T00:00:00Z"))
 
 
 class AdapterTests(unittest.TestCase):

@@ -99,6 +99,7 @@ class Cursor:
 class RawMessage:
     content_text: str
     published_at: str
+    published_time_known: bool = True
     platform_message_id: str | None = None
     conversation_id: str | None = None
     conversation_name: str | None = None

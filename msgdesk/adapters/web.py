@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urldefrag, urljoin, urlsplit
 
 from ..models import AdapterCapabilities, Cursor, FetchResult, RawMessage, ValidationResult
-from ..timeutil import iso_utc, parse_datetime
+from ..timeutil import has_explicit_time, iso_utc, parse_datetime
 from .base import BaseAdapter, FetchOptions, SourceContext
 
 
@@ -223,17 +223,19 @@ class WebAdapter(BaseAdapter):
             previous_hash = previous
         if previous_hash == content_hash:
             return FetchResult(next_cursor=cursor, stats={"fetched": 0, "skipped": 1, "failed": 0})
-        published = (
-            parse_datetime(parser.meta.get("article:published_time"))
-            or parse_datetime(parser.meta.get("og:updated_time"))
-            or (parse_datetime(parser.time_values[0]) if parser.time_values else None)
+        published_text = (
+            parser.meta.get("article:published_time")
+            or parser.meta.get("og:updated_time")
+            or (parser.time_values[0] if parser.time_values else None)
         )
+        published = parse_datetime(published_text)
         message = RawMessage(
             platform_message_id=f"{url}#{content_hash[:16]}",
             conversation_id=url,
             conversation_name=title,
             conversation_kind="web",
             published_at=iso_utc(published),
+            published_time_known=has_explicit_time(published_text),
             content_text=f"{title}\n\n{body_text}" if title not in body_text else body_text,
             content_type="link",
             source_url=url,
@@ -305,12 +307,12 @@ class WebAdapter(BaseAdapter):
                     or text
                 )
                 body_text = "\n\n".join(article_parser.paragraphs) or article_parser.description
-                published = (
-                    parse_datetime(article_parser.meta.get("article:published_time"))
-                    or parse_datetime(article_parser.meta.get("og:updated_time"))
-                    or (parse_datetime(article_parser.time_values[0])
-                        if article_parser.time_values else None)
+                published_text = (
+                    article_parser.meta.get("article:published_time")
+                    or article_parser.meta.get("og:updated_time")
+                    or (article_parser.time_values[0] if article_parser.time_values else None)
                 )
+                published = parse_datetime(published_text)
                 if not body_text:
                     warnings.append(f"正文未提取: {absolute}")
                     body_text = text
@@ -321,6 +323,7 @@ class WebAdapter(BaseAdapter):
                         conversation_name=source.name,
                         conversation_kind="web",
                         published_at=iso_utc(published),
+                        published_time_known=has_explicit_time(published_text),
                         content_text=f"{title}\n\n{body_text}",
                         content_type="link",
                         source_url=absolute,

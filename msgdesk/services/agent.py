@@ -23,7 +23,7 @@ from ..adapters.base import FetchOptions, HttpFetcher, SourceContext
 from ..adapters.web import _parse_page
 from ..errors import AppError
 from ..models import Cursor, FetchResult, RawMessage
-from ..timeutil import iso_utc, local_zone, parse_datetime
+from ..timeutil import has_explicit_time, iso_utc, local_zone, parse_datetime
 from .profile_prompt import profile_prompt
 
 MAX_STEPS = 18
@@ -348,7 +348,8 @@ class AgentCollector:
         for item in items[:MAX_ITEMS]:
             if not isinstance(item, dict):
                 continue
-            published = parse_datetime(str(item.get("published_at") or ""))
+            published_text = str(item.get("published_at") or "").strip()
+            published = parse_datetime(published_text)
             published_day = (
                 published.astimezone(self.zone).date().isoformat()
                 if published is not None else ""
@@ -393,6 +394,7 @@ class AgentCollector:
                     conversation_name=title,
                     conversation_kind="web",
                     published_at=iso_utc(published),
+                    published_time_known=has_explicit_time(published_text),
                     content_text=content,
                     content_type="markdown",
                     source_url=link,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone, tzinfo
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
@@ -39,6 +40,13 @@ def parse_datetime(value: str | None) -> datetime | None:
         return parsed.astimezone(UTC)
     except (TypeError, ValueError):
         return None
+
+
+def has_explicit_time(value: str | None) -> bool:
+    """Whether a source value contains a concrete hour and minute."""
+    if not value:
+        return False
+    return bool(re.search(r"(?:T|\s)\d{1,2}:\d{2}", value.strip()))
 
 
 _FALLBACK_OFFSETS = {"Asia/Shanghai": 8, "Asia/Chongqing": 8, "UTC": 0, "Etc/UTC": 0}

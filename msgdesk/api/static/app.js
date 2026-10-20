@@ -67,20 +67,25 @@ function safeUrl(value) {
   }
 }
 
-function fmtTime(value) {
+function fmtTime(value, timeKnown = true) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+  const day = date.toLocaleDateString('zh-CN', {month: '2-digit', day: '2-digit'});
+  if (!timeKnown) return `${day} --:--`;
+  const clock = date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit', minute: '2-digit', hour12: false
   });
+  return `${day} ${clock}`;
 }
 
-function fmtFullTime(value) {
+function fmtFullTime(value, timeKnown = true) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('zh-CN', { hour12: false });
+  const day = date.toLocaleDateString('zh-CN');
+  if (!timeKnown) return `${day} --:--`;
+  return `${day} ${date.toLocaleTimeString('zh-CN', {hour12: false})}`;
 }
 
 function dateKey(value) {
@@ -593,7 +598,7 @@ function renderMessages() {
         <label class="check" onclick="event.stopPropagation()">
           <input type="checkbox" ${selected ? 'checked' : ''} onchange="toggleSelect('${message.id}', this.checked)">
         </label>
-        <div class="msg-time">${esc(fmtTime(message.published_at))}
+        <div class="msg-time">${esc(fmtTime(message.published_at, message.published_time_known !== 0))}
           <div class="src">${esc(message.source_name || '未知来源')}</div>
         </div>
         <div class="msg-summary">
@@ -735,7 +740,7 @@ async function openMessage(id) {
       <div class="meta-grid">
         <div><div class="label">来源</div><div class="value">${esc(message.source_name || '—')}</div></div>
         <div><div class="label">会话</div><div class="value">${esc(message.conversation_name || '—')}</div></div>
-        <div><div class="label">原文时间</div><div class="value">${esc(fmtFullTime(message.published_at))}</div></div>
+        <div><div class="label">原文时间</div><div class="value">${esc(fmtFullTime(message.published_at, message.published_time_known !== 0))}</div></div>
       </div>
       <div class="row" style="margin:12px 0">
         <button class="btn tiny" onclick="toggleRead('${message.id}', ${message.is_read ? 'false' : 'true'})">${message.is_read ? '标记未读' : '标记已读'}</button>
