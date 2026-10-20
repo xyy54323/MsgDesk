@@ -26,8 +26,8 @@ from ..models import Cursor, FetchResult, RawMessage
 from ..timeutil import iso_utc, local_zone, parse_datetime
 from .profile_prompt import profile_prompt
 
-MAX_STEPS = 12
-MAX_ITEMS = 15
+MAX_STEPS = 30
+MAX_ITEMS = 30
 PAGE_CHAR_LIMIT = 6000
 LINK_LIMIT = 60
 
@@ -304,6 +304,8 @@ class AgentCollector:
             f"采集日期范围是 {self.range_start} 至 {self.range_end}（含首尾）。\n"
             "工作方式：先抓取起始地址，阅读内容；如果它是列表页，挑选真正需要归档的条目并逐条抓取详情。\n"
             "列表页里发布日期在采集范围内的每一条都要单独调用 fetch_page 抓详情，不要遗漏，也不要只看第一条。\n"
+            "如果列表页有“下一页”、页码或归档链接，必须继续抓取后续列表页，"
+            "直到列表日期早于全局起始日期或没有更早页面；不能只看第一页。\n"
             "只保留发布日期在采集范围内的条目；无法确认日期的条目一律丢弃。\n"
             "抓够之后，输出一个 JSON 对象，不要输出任何其他文字：\n"
             '{"items":[{"title":"标题","url":"原文地址","published_at":"YYYY-MM-DD",'
