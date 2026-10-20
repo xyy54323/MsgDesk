@@ -193,12 +193,20 @@ class SyncService:
                     attachments = self._download_attachments(
                         raw, source_id, warnings
                     )
+                    sections: list[str] = []
                     if attachments:
-                        text += "\n\n## 附件\n\n" + "\n".join(
+                        sections.append("\n\n## 附件\n\n" + "\n".join(
                             f"![图片]({url})" if kind == "image"
                             else f"- [{name}]({url})"
                             for name, url, kind in attachments
-                        )
+                        ))
+                    note = (
+                        self._expired_image_note(raw, attachments) if is_qq else ""
+                    )
+                    if note:
+                        sections.append("\n\n" + note)
+                    if sections:
+                        text += "".join(sections)
                         digest = content_hash(text)
                     raw_ref = self._write_raw(raw_dir, source_id, raw.raw_payload or {
                         "content_text": text,
@@ -305,7 +313,11 @@ class SyncService:
         try:
             for message in self.repo.list_messages(limit=1000, source_id=source_id):
                 content = str(message.get("content_text") or "")
-                if "## 附件" in content or "/attachments/" in content:
+                if (
+                    "## 附件" in content
+                    or "/attachments/" in content
+                    or "原图已在 QQ 侧过期" in content
+                ):
                     continue
                 raw_ref = str(message.get("raw_payload_ref") or "").strip()
                 if not raw_ref:
@@ -326,13 +338,18 @@ class SyncService:
                 if converted is None or not converted.attachments:
                     continue
                 saved = self._download_attachments(converted, source_id, [])
-                if not saved:
+                note = self._expired_image_note(converted, saved)
+                if not saved and not note:
                     continue
-                updated = converted.content_text + "\n\n## 附件\n\n" + "\n".join(
-                    f"![图片]({url})" if kind == "image"
-                    else f"- [{name}]({url})"
-                    for name, url, kind in saved
-                )
+                updated = converted.content_text
+                if saved:
+                    updated += "\n\n## 附件\n\n" + "\n".join(
+                        f"![图片]({url})" if kind == "image"
+                        else f"- [{name}]({url})"
+                        for name, url, kind in saved
+                    )
+                if note:
+                    updated += "\n\n" + note
                 self.repo.update_message_fields(
                     message["id"],
                     {
@@ -440,6 +457,22 @@ class SyncService:
             (root / stored_name).write_bytes(body)
             saved.append((name, f"/attachments/{date_text}/{stored_name}", kind))
         return saved
+
+    @staticmethod
+    def _expired_image_note(raw: Any, saved: list[tuple[str, str, str]]) -> str:
+        """Explain QQ images whose CDN copy expired and has no local cache."""
+        images = [
+            entry
+            for entry in (getattr(raw, "attachments", []) or [])
+            if isinstance(entry, dict) and str(entry.get("type") or "") == "image"
+        ]
+        if not images:
+            return ""
+        saved_images = sum(1 for _, _, kind in saved if kind == "image")
+        missing = len(images) - saved_images
+        if missing <= 0:
+            return ""
+        return f"> {missing} 张图片的原图已在 QQ 侧过期，无法恢复"
 
     @staticmethod
     def _write_raw(directory: Path, source_id: str, payload: dict[str, Any], now: str) -> Path:
