@@ -190,14 +190,84 @@ function buildDatePicker(anchor, current, onPick) {
     }
   });
 
+  placePop(panel, anchor);
+}
+
+function placePop(panel, anchor) {
   const rect = anchor.getBoundingClientRect();
   const height = panel.offsetHeight;
   const openUp = window.innerHeight - rect.bottom < height + 12 && rect.top > height + 12;
   panel.style.top = openUp
     ? `${window.scrollY + rect.top - height - 6}px`
     : `${window.scrollY + rect.bottom + 6}px`;
-  const maxLeft = document.documentElement.clientWidth - 280;
+  const maxLeft = document.documentElement.clientWidth - panel.offsetWidth - 16;
   panel.style.left = `${window.scrollX + Math.max(8, Math.min(rect.left, maxLeft))}px`;
+}
+
+function pickDigestTime() {
+  const input = document.getElementById('digestTime');
+  if (!input) return;
+  openTimePicker(input, input.value || '22:00', value => {
+    input.value = value;
+  });
+}
+
+function openTimePicker(anchor, current, onPick) {
+  setTimeout(() => buildTimePicker(anchor, current, onPick), 0);
+}
+
+function buildTimePicker(anchor, current, onPick) {
+  closeDatePicker();
+  const initial = /^\d{1,2}:\d{2}$/.test(current || '') ? current : '22:00';
+  let [hour, minute] = initial.split(':').map(Number);
+  const pad = value => String(value).padStart(2, '0');
+  const panel = document.createElement('div');
+  panel.className = 'date-pop time-pop';
+  panel.innerHTML = `
+    <div class="date-pop-head"><span class="date-pop-title">选择日报时间</span></div>
+    <div class="time-pop-cols">
+      <div class="time-pop-col">
+        <div class="time-pop-label">时</div>
+        <div class="time-pop-grid" data-kind="hour"></div>
+      </div>
+      <div class="time-pop-col">
+        <div class="time-pop-label">分</div>
+        <div class="time-pop-grid" data-kind="minute"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(panel);
+  datePopEl = panel;
+  panel.addEventListener('click', event => event.stopPropagation());
+  const hours = panel.querySelector('[data-kind="hour"]');
+  const minutes = panel.querySelector('[data-kind="minute"]');
+  hours.innerHTML = Array.from({ length: 24 }, (_, index) => index)
+    .map(value => `<button type="button" class="date-pop-day${value === hour ? ' sel' : ''}" data-hour="${value}">${pad(value)}</button>`)
+    .join('');
+  const minuteValues = Array.from({ length: 12 }, (_, index) => index * 5);
+  if (minute % 5 !== 0) minuteValues.push(minute);
+  minuteValues.sort((a, b) => a - b);
+  minutes.innerHTML = minuteValues
+    .map(value => `<button type="button" class="date-pop-day${value === minute ? ' sel' : ''}" data-minute="${value}">${pad(value)}</button>`)
+    .join('');
+  const select = (button) => {
+    button.parentElement.querySelectorAll('.sel').forEach(item => item.classList.remove('sel'));
+    button.classList.add('sel');
+  };
+  panel.addEventListener('click', event => {
+    const hourPick = event.target.closest('[data-hour]');
+    if (hourPick) {
+      hour = Number(hourPick.dataset.hour);
+      select(hourPick);
+      return;
+    }
+    const minutePick = event.target.closest('[data-minute]');
+    if (minutePick) {
+      minute = Number(minutePick.dataset.minute);
+      closeDatePicker();
+      onPick(`${pad(hour)}:${pad(minute)}`);
+    }
+  });
+  placePop(panel, anchor);
 }
 
 function dateLabel(key) {

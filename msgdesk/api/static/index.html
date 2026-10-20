@@ -145,7 +145,10 @@
           <div class="form-grid" style="margin-top:14px">
             <label class="field">
               <span class="field-title">日报生成时间</span>
-              <input id="digestTime" type="time" step="60" placeholder="22:00">
+              <span class="date-row">
+                <input id="digestTime" readonly placeholder="22:00" onclick="pickDigestTime()">
+                <button type="button" class="btn tiny" onclick="pickDigestTime()">选择</button>
+              </span>
             </label>
             <label class="field">
               <span class="field-title">开机自启动</span>

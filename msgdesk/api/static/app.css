@@ -594,6 +594,18 @@
   }
   .date-pop-foot { display: flex; justify-content: space-between; margin-top: 8px; }
 
+  .time-pop { width: 200px; }
+  .time-pop-cols { display: flex; gap: 8px; }
+  .time-pop-col { flex: 1; min-width: 0; }
+  .time-pop-label {
+    margin-bottom: 4px; text-align: center; color: var(--muted);
+    font: 10px/1.4 "Cascadia Mono", Consolas, monospace;
+  }
+  .time-pop-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px;
+    max-height: 168px; overflow: auto;
+  }
+
   .drawer-body { flex: 1; overflow: auto; padding: 16px; }
   .drawer-body .empty-state { border-style: solid; }
   .digest-meta { margin-bottom: 12px; color: var(--muted); font-size: 11px; }
