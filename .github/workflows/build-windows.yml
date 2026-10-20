@@ -134,9 +134,17 @@ jobs:
             "- 需要登录的网站，请在来源设置中填写 Cookie"
           ) -join "`n"
           gh release view $tag 2>$null | Out-Null
-          if ($LASTEXITCODE -eq 0) { throw "Release $tag 已存在" }
-          gh release create $tag `
-            "dist\MsgDesk-Setup-$version.exe" `
-            "dist\MsgDesk-win64.zip" `
-            --title "MsgDesk $version" `
-            --notes $notes
+          if ($LASTEXITCODE -eq 0) {
+            # Same version rebuild: replace the assets and refresh the notes.
+            gh release upload $tag `
+              "dist\MsgDesk-Setup-$version.exe" `
+              "dist\MsgDesk-win64.zip" `
+              --clobber
+            gh release edit $tag --notes $notes
+          } else {
+            gh release create $tag `
+              "dist\MsgDesk-Setup-$version.exe" `
+              "dist\MsgDesk-win64.zip" `
+              --title "MsgDesk $version" `
+              --notes $notes
+          }
