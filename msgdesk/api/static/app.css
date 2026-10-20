@@ -163,6 +163,8 @@
   .search-icon { position: absolute; left: 8px; color: var(--muted); pointer-events: none; }
   .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
   .check input { width: 15px; height: 15px; accent-color: var(--olive); }
+  /* Grid items stretch by default; keep the clickable label as wide as its text. */
+  .field > .check { justify-self: start; width: max-content; max-width: 100%; }
 
   .panel {
     background: var(--panel); border: 2px solid var(--line);
