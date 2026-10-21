@@ -179,6 +179,7 @@ class AgentCollector:
             parser.meta.get("article:published_time", ""),
             parser.meta.get("og:updated_time", ""),
             *parser.time_values,
+            *parser.visible_texts,
             *parser.paragraphs,
         ]:
             published = parse_source_datetime(value, self.config.system.timezone)

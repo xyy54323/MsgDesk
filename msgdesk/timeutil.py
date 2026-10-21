@@ -62,27 +62,30 @@ def parse_source_datetime(value: str | None, zone_name: str) -> datetime | None:
     text = str(value or "").strip()
     if not text:
         return None
-    match = _SOURCE_DATETIME_RE.search(text)
-    if match:
+    matches = list(_SOURCE_DATETIME_RE.finditer(text))
+    for match in matches:
         second = int(match.group("second") or 0)
         zone_text = match.group("zone")
-        if zone_text:
-            normalized = (
-                f"{match.group('year')}-{int(match.group('month')):02d}-"
-                f"{int(match.group('day')):02d}T{int(match.group('hour')):02d}:"
-                f"{int(match.group('minute')):02d}:{second:02d}"
-                f"{'+00:00' if zone_text == 'Z' else zone_text}"
-            )
-            return parse_datetime(normalized)
-        return datetime(
-            int(match.group("year")),
-            int(match.group("month")),
-            int(match.group("day")),
-            int(match.group("hour")),
-            int(match.group("minute")),
-            second,
-            tzinfo=local_zone(zone_name),
-        ).astimezone(UTC)
+        try:
+            if zone_text:
+                normalized = (
+                    f"{match.group('year')}-{int(match.group('month')):02d}-"
+                    f"{int(match.group('day')):02d}T{int(match.group('hour')):02d}:"
+                    f"{int(match.group('minute')):02d}:{second:02d}"
+                    f"{'+00:00' if zone_text == 'Z' else zone_text}"
+                )
+                return parse_datetime(normalized)
+            return datetime(
+                int(match.group("year")),
+                int(match.group("month")),
+                int(match.group("day")),
+                int(match.group("hour")),
+                int(match.group("minute")),
+                second,
+                tzinfo=local_zone(zone_name),
+            ).astimezone(UTC)
+        except ValueError:
+            continue
     if has_explicit_time(text):
         return parse_datetime(text)
     return None

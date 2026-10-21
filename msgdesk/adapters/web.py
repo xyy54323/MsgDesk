@@ -30,6 +30,7 @@ class _PageParser(HTMLParser):
         self.description = ""
         self.meta: dict[str, str] = {}
         self.paragraphs: list[str] = []
+        self.visible_texts: list[str] = []
         self.links: list[tuple[str, str]] = []
         self.images: list[str] = []
         self.time_values: list[str] = []
@@ -93,6 +94,8 @@ class _PageParser(HTMLParser):
         text = data.strip()
         if not text:
             return
+        if len(self.visible_texts) < 4000:
+            self.visible_texts.append(text)
         if self._in_title:
             self.title_parts.append(text)
         if self._current_link:

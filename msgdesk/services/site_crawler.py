@@ -117,6 +117,7 @@ class StaticListCollector:
                     parser.meta.get("article:published_time", ""),
                     parser.meta.get("og:updated_time", ""),
                     *parser.time_values,
+                    *parser.visible_texts,
                     *parser.paragraphs,
                 ],
                 date_text,

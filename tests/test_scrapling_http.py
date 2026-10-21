@@ -520,7 +520,7 @@ STATIC_LIST_PAGE_2 = b"""
 
 STATIC_ARTICLE_PAGE = b"""
 <html><head><title>First story detail</title></head><body>
-<p>Time: 2026-10-21 09:10:48</p>
+<div class="wzxxys">Author: Research Office &nbsp;&nbsp; Time: 2026-10-21 09:10:48</div>
 <p>Detailed article body for the shared-fetcher test.</p>
 <img src="/image.png">
 <a href="/files/report.pdf">Report.pdf</a>
