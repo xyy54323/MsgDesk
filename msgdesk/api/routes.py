@@ -478,8 +478,11 @@ class ApiRouter:
                                     pass
                         title = " ".join(parser.title_parts).strip()
                         body_text = "\n".join(parser.paragraphs)
-                        needs_login = len(body_text) < 300 and "登录" in (
-                            title + body_text[:80]
+                        login_head = title + body_text[:160]
+                        needs_login = (
+                            ("登录" in title or "sign in" in title.lower())
+                            or (len(body_text) < 120 and "登录" in login_head)
+                            or ("用户名" in login_head and "密码" in login_head)
                         )
                         source_config["cookie_invalid"] = needs_login
                         source_config["cookie_checked_at"] = iso_utc()

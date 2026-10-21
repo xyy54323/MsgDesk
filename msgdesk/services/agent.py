@@ -23,7 +23,7 @@ from ..adapters.base import FetchOptions, HttpFetcher, SourceContext
 from ..adapters.web import _parse_page
 from ..errors import AppError
 from ..models import Cursor, FetchResult, RawMessage
-from ..timeutil import has_explicit_time, iso_utc, local_zone, parse_datetime
+from ..timeutil import has_explicit_time, iso_utc, local_zone, parse_datetime, parse_source_datetime
 from .profile_prompt import profile_prompt
 
 MAX_STEPS = 18
@@ -60,6 +60,7 @@ class AgentCollector:
         if not self.range_end:
             self.range_end = self.today.isoformat()
         self._browser = None
+        self._page_published_at: dict[str, str] = {}
 
     def _ensure_context(self):
         """Open the saved login profile once per run so the session refreshes."""
@@ -174,6 +175,18 @@ class AgentCollector:
     def _fetch_page(self, url: str, headers: dict[str, str]) -> dict[str, Any]:
         body, final_url, _ = self._http_get(url, headers)
         parser = _parse_page(body, final_url)
+        for value in [
+            parser.meta.get("article:published_time", ""),
+            parser.meta.get("og:updated_time", ""),
+            *parser.time_values,
+            *parser.paragraphs,
+        ]:
+            published = parse_source_datetime(value, self.config.system.timezone)
+            if published is not None:
+                published_text = iso_utc(published)
+                self._page_published_at[url] = published_text
+                self._page_published_at[final_url] = published_text
+                break
         title = " ".join(parser.title_parts).strip() or final_url
         text = "\n\n".join(parser.paragraphs) or parser.description
         if len(text) < 300 and ("登录" in title or "登录" in text[:80]):
@@ -362,6 +375,14 @@ class AgentCollector:
             link = str(item.get("url") or base_url).strip()
             title = str(item.get("title") or source.name).strip()
             content = str(item.get("content_md") or item.get("summary") or "").strip()
+            page_published_at = self._page_published_at.get(link)
+            if page_published_at:
+                published_text = page_published_at
+                published = parse_datetime(published_text)
+                published_day = (
+                    published.astimezone(self.zone).date().isoformat()
+                    if published is not None else ""
+                )
             image_urls = [str(u) for u in (item.get("images") or []) if str(u).startswith("http")]
             inline_images = re.findall(r"!\[[^\]]*\]\((https?://[^)\s]+)\)", content)
             for url in inline_images:

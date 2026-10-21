@@ -507,7 +507,7 @@ STATIC_ATTACHMENT_URL = "https://static.example.test/files/report.pdf"
 
 STATIC_LIST_PAGE_1 = b"""
 <html><head><title>News</title></head><body>
-<p><a href="/article.html">First story</a> - 2026-10-20</p>
+<p><a href="/article.html">First story</a> - 2026-10-21</p>
 <a href="/page2.html">2</a>
 </body></html>
 """
@@ -520,6 +520,7 @@ STATIC_LIST_PAGE_2 = b"""
 
 STATIC_ARTICLE_PAGE = b"""
 <html><head><title>First story detail</title></head><body>
+<p>Time: 2026-10-21 09:10:48</p>
 <p>Detailed article body for the shared-fetcher test.</p>
 <img src="/image.png">
 <a href="/files/report.pdf">Report.pdf</a>
@@ -541,8 +542,8 @@ class StaticListCollectorFetcherTests(unittest.TestCase):
     def make_config(self, root: str) -> AppConfig:
         config = AppConfig()
         config.system.data_dir = root
-        config.date_range.start = "2026-10-20"
-        config.date_range.end = "2026-10-20"
+        config.date_range.start = "2026-10-21"
+        config.date_range.end = "2026-10-21"
         return config
 
     def test_list_pagination_article_media_and_attachment_share_fetcher(self) -> None:
@@ -621,8 +622,10 @@ class StaticListCollectorFetcherTests(unittest.TestCase):
         self.assertEqual(fetcher.close_calls, 1)
         self.assertEqual(len(result.messages), 1)
         self.assertEqual(result.messages[0].source_url, STATIC_ARTICLE_URL)
-        self.assertIn("/media/2026-10-20/", result.messages[0].content_text)
-        self.assertIn("/attachments/2026-10-20/", result.messages[0].content_text)
+        self.assertEqual(result.messages[0].published_at, "2026-10-21T01:10:48Z")
+        self.assertTrue(result.messages[0].published_time_known)
+        self.assertIn("/media/2026-10-21/", result.messages[0].content_text)
+        self.assertIn("/attachments/2026-10-21/", result.messages[0].content_text)
 
     def test_static_collector_closes_on_unavailable_without_masking_error(self) -> None:
         fetcher = MappingFetcher(

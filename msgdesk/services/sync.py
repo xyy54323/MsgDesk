@@ -147,14 +147,19 @@ class SyncService:
                         )
                         if existing is not None:
                             old_content = str(existing["content_text"] or "")
-                            if (
-                                source_row["type"] in ("web", "ai_web")
-                                and text != old_content
-                            ):
+                            if source_row["type"] in ("web", "ai_web"):
                                 conn.execute(
                                     "UPDATE messages SET content_text = ?, "
-                                    "content_hash = ?, updated_at = ? WHERE id = ?",
-                                    (text, content_hash(text), now, existing["id"]),
+                                    "content_hash = ?, published_at = ?, "
+                                    "published_time_known = ?, updated_at = ? WHERE id = ?",
+                                    (
+                                        text if text != old_content else old_content,
+                                        content_hash(text) if text != old_content else existing["content_hash"],
+                                        raw.published_at,
+                                        int(bool(raw.published_time_known)),
+                                        now,
+                                        existing["id"],
+                                    ),
                                 )
                             stats["duplicated"] += 1
                             continue
@@ -227,6 +232,7 @@ class SyncService:
                             "content_type": infer_content_type(raw.__dict__),
                             "content_text": text,
                             "content_completeness": raw.content_completeness,
+                            "published_time_known": raw.published_time_known,
                             "source_url": raw.source_url,
                             "raw_payload_ref": str(raw_ref),
                             "content_hash": digest,

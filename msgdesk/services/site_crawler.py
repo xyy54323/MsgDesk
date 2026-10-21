@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urldefrag, urljoin, urlsplit
@@ -20,7 +19,7 @@ from ..adapters.web import _parse_page
 from ..config import AppConfig
 from ..errors import AppError
 from ..models import Cursor, FetchResult, RawMessage
-from ..timeutil import iso_utc, local_zone
+from ..timeutil import iso_utc, source_published_datetime
 
 DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
 MAX_PAGES = 100
@@ -39,7 +38,6 @@ class StaticListUnavailable(Exception):
 class StaticListCollector:
     def __init__(self, config: AppConfig):
         self.config = config
-        self.zone = local_zone(config.system.timezone)
         self.range_start, self.range_end = config.effective_range()
 
     def collect(self, source: SourceContext) -> FetchResult:
@@ -114,6 +112,16 @@ class StaticListCollector:
             body = "\n\n".join(parser.paragraphs).strip() or parser.description.strip()
             if not title or not body:
                 continue
+            published_at, published_time_known = source_published_datetime(
+                [
+                    parser.meta.get("article:published_time", ""),
+                    parser.meta.get("og:updated_time", ""),
+                    *parser.time_values,
+                    *parser.paragraphs,
+                ],
+                date_text,
+                self.config.system.timezone,
+            )
             article_base = response.url or target
             images: list[str] = []
             for src in parser.images:
@@ -124,6 +132,8 @@ class StaticListCollector:
                 {
                     "target": target,
                     "date": date_text,
+                    "published_at": published_at,
+                    "published_time_known": published_time_known,
                     "title": title,
                     "body": body,
                     "images": images,
@@ -156,17 +166,14 @@ class StaticListCollector:
                 body += "\n\n" + "\n".join(image_lines)
             if file_lines:
                 body += "\n\n## 附件\n\n" + "\n".join(file_lines)
-            published_at = datetime.combine(
-                date.fromisoformat(date_text), time.min, self.zone
-            )
             messages.append(
                 RawMessage(
                     platform_message_id=target,
                     conversation_id=url,
                     conversation_name=title,
                     conversation_kind="web",
-                    published_at=iso_utc(published_at),
-                    published_time_known=False,
+                    published_at=article["published_at"],
+                    published_time_known=article["published_time_known"],
                     content_text=f"{title}\n\n{body}",
                     content_type="markdown",
                     source_url=target,
