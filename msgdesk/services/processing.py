@@ -13,6 +13,7 @@ from ..repository import Repository
 from ..timeutil import iso_utc, local_date_of, utc_now
 from .model import ModelInput, ModelProvider
 from .profile_prompt import profile_prompt
+from .scheduler import digest_due_at
 
 PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
 
@@ -109,7 +110,10 @@ class ProcessingService:
 
         self.repo.save_processing(message_id, merged)
         date_text = local_date_of(message["collected_at"], self.config.system.timezone)
-        if not self.repo.has_active_digest_job(date_text):
+        if (
+            digest_due_at(self.config, date_text) is not None
+            and not self.repo.has_active_digest_job(date_text)
+        ):
             self.repo.enqueue_job(
                 "generate_digest",
                 payload={"date": date_text},

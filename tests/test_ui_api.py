@@ -6,6 +6,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -33,7 +34,14 @@ def _request(
         return exc.code, json.loads(exc.read() or b"{}")
 
 
-def _seed_message(repo, source_id: str, platform_id: str, text: str) -> str:
+def _seed_message(
+    repo,
+    source_id: str,
+    platform_id: str,
+    text: str,
+    *,
+    collected_at: str | None = None,
+) -> str:
     with repo.db.connection() as conn:
         conversation_id = repo.upsert_conversation(
             conn, source_id, "conversation-1", "测试群", "group"
@@ -45,11 +53,20 @@ def _seed_message(repo, source_id: str, platform_id: str, text: str) -> str:
                 "conversation_id": conversation_id,
                 "platform_message_id": platform_id,
                 "published_at": iso_utc(),
+                "collected_at": collected_at,
                 "content_text": text,
                 "content_hash": f"hash-{platform_id}",
             },
         )
     return message_id
+
+
+def _digest_jobs(repo) -> list[dict]:
+    return [
+        job
+        for job in repo.list_jobs(limit=50)
+        if job["type"] == "generate_digest"
+    ]
 
 
 class UiApiTests(unittest.TestCase):
@@ -68,6 +85,8 @@ class UiApiTests(unittest.TestCase):
             encoding="utf-8",
         )
         config = load_config(config_path)
+        config.system.timezone = "Asia/Shanghai"
+        config.scheduling.digest_time = "22:00"
         runtime = Runtime(config)
         server = ApiServer(("127.0.0.1", 0), runtime)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -82,6 +101,195 @@ class UiApiTests(unittest.TestCase):
             }
         )
         return runtime, server, base, source["id"]
+
+    def test_digest_api_paths_wait_for_configured_time(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, source_id = self._start(Path(tmp))
+            try:
+                batched = _seed_message(
+                    runtime.repo,
+                    source_id,
+                    "m-before-batch",
+                    "批量忽略测试",
+                    collected_at="2026-10-21T01:00:00Z",
+                )
+                single = _seed_message(
+                    runtime.repo,
+                    source_id,
+                    "m-before-single",
+                    "单条忽略测试",
+                    collected_at="2026-10-21T02:00:00Z",
+                )
+                before_due = datetime(2026, 10, 21, 13, 59, tzinfo=timezone.utc)
+                with mock.patch(
+                    "msgdesk.api.routes.utc_now", return_value=before_due
+                ), mock.patch(
+                    "msgdesk.services.scheduler.utc_now", return_value=before_due
+                ):
+                    status, _ = _request(
+                        base,
+                        "PATCH",
+                        f"/api/sources/{source_id}",
+                        {"default_category": "研究生通知"},
+                    )
+                    self.assertEqual(status, 200)
+                    status, _ = _request(
+                        base,
+                        "POST",
+                        "/api/messages/batch-ignore",
+                        {"ids": [batched], "ignored": True},
+                    )
+                    self.assertEqual(status, 200)
+                    status, _ = _request(
+                        base,
+                        "PATCH",
+                        f"/api/messages/{single}",
+                        {"ignored": True},
+                    )
+                    self.assertEqual(status, 200)
+
+                self.assertEqual(_digest_jobs(runtime.repo), [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_source_category_update_enqueues_at_configured_time(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, source_id = self._start(Path(tmp))
+            try:
+                at_due = datetime(2026, 10, 21, 14, 0, tzinfo=timezone.utc)
+                with mock.patch(
+                    "msgdesk.api.routes.utc_now", return_value=at_due
+                ), mock.patch(
+                    "msgdesk.services.scheduler.utc_now", return_value=at_due
+                ):
+                    for category in ("分类一", "分类二"):
+                        status, _ = _request(
+                            base,
+                            "PATCH",
+                            f"/api/sources/{source_id}",
+                            {"default_category": category},
+                        )
+                        self.assertEqual(status, 200)
+
+                jobs = _digest_jobs(runtime.repo)
+                self.assertEqual(len(jobs), 1)
+                self.assertEqual(
+                    json.loads(jobs[0]["payload_json"])["date"], "2026-10-21"
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_batch_ignore_enqueues_at_configured_time_and_deduplicates(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, source_id = self._start(Path(tmp))
+            try:
+                message_id = _seed_message(
+                    runtime.repo,
+                    source_id,
+                    "m-batch-due",
+                    "批量忽略到点测试",
+                    collected_at="2026-10-21T02:00:00Z",
+                )
+                at_due = datetime(2026, 10, 21, 14, 0, tzinfo=timezone.utc)
+                with mock.patch(
+                    "msgdesk.api.routes.utc_now", return_value=at_due
+                ), mock.patch(
+                    "msgdesk.services.scheduler.utc_now", return_value=at_due
+                ):
+                    for ignored in (True, False):
+                        status, _ = _request(
+                            base,
+                            "POST",
+                            "/api/messages/batch-ignore",
+                            {"ids": [message_id], "ignored": ignored},
+                        )
+                        self.assertEqual(status, 200)
+
+                jobs = _digest_jobs(runtime.repo)
+                self.assertEqual(len(jobs), 1)
+                self.assertEqual(
+                    json.loads(jobs[0]["payload_json"])["date"], "2026-10-21"
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_single_ignore_enqueues_at_configured_time_and_deduplicates(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, source_id = self._start(Path(tmp))
+            try:
+                message_id = _seed_message(
+                    runtime.repo,
+                    source_id,
+                    "m-single-due",
+                    "单条忽略到点测试",
+                    collected_at="2026-10-21T02:00:00Z",
+                )
+                at_due = datetime(2026, 10, 21, 14, 0, tzinfo=timezone.utc)
+                with mock.patch(
+                    "msgdesk.api.routes.utc_now", return_value=at_due
+                ), mock.patch(
+                    "msgdesk.services.scheduler.utc_now", return_value=at_due
+                ):
+                    for ignored in (True, False):
+                        status, _ = _request(
+                            base,
+                            "PATCH",
+                            f"/api/messages/{message_id}",
+                            {"ignored": ignored},
+                        )
+                        self.assertEqual(status, 200)
+
+                jobs = _digest_jobs(runtime.repo)
+                self.assertEqual(len(jobs), 1)
+                self.assertEqual(
+                    json.loads(jobs[0]["payload_json"])["date"], "2026-10-21"
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
+
+    def test_single_ignore_enqueues_past_day_before_configured_time(self):
+        with TemporaryDirectory() as tmp:
+            runtime, server, base, source_id = self._start(Path(tmp))
+            try:
+                message_id = _seed_message(
+                    runtime.repo,
+                    source_id,
+                    "m-single-history",
+                    "历史消息忽略测试",
+                    collected_at="2026-10-20T01:00:00Z",
+                )
+                before_due = datetime(2026, 10, 21, 13, 59, tzinfo=timezone.utc)
+                with mock.patch(
+                    "msgdesk.api.routes.utc_now", return_value=before_due
+                ), mock.patch(
+                    "msgdesk.services.scheduler.utc_now", return_value=before_due
+                ):
+                    for ignored in (True, False):
+                        status, _ = _request(
+                            base,
+                            "PATCH",
+                            f"/api/messages/{message_id}",
+                            {"ignored": ignored},
+                        )
+                        self.assertEqual(status, 200)
+
+                jobs = _digest_jobs(runtime.repo)
+                self.assertEqual(len(jobs), 1)
+                self.assertEqual(
+                    json.loads(jobs[0]["payload_json"])["date"], "2026-10-20"
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                runtime.stop()
 
     def test_message_read_hide_and_purge(self):
         with TemporaryDirectory() as tmp:

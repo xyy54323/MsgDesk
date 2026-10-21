@@ -4,9 +4,11 @@ import json
 import threading
 import unittest
 import urllib.request
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from msgdesk import __version__
 from msgdesk.adapters.base import BaseAdapter, FetchOptions, FetchResponse, SourceContext
@@ -219,6 +221,34 @@ class ProcessingTests(unittest.TestCase):
         ).sync_source(source["id"])
         return source
 
+    def _insert_message(
+        self,
+        repo: Repository,
+        source: dict,
+        *,
+        collected_at: str,
+        content_hash: str,
+    ) -> str:
+        with repo.db.connection() as conn:
+            return repo.insert_message(
+                conn,
+                {
+                    "source_id": source["id"],
+                    "published_at": collected_at,
+                    "collected_at": collected_at,
+                    "content_text": "处理队列日报时间测试",
+                    "content_hash": content_hash,
+                    "source_url": PAGE_URL,
+                },
+            )
+
+    def _digest_jobs(self, repo: Repository) -> list[dict]:
+        return [
+            job
+            for job in repo.list_jobs(limit=50)
+            if job["type"] == "generate_digest"
+        ]
+
     def test_model_processing_and_source_category(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -249,6 +279,82 @@ class ProcessingTests(unittest.TestCase):
             saved = repo.get_message(message["id"])
             self.assertEqual(saved["processing_status"], "failed")
 
+    def test_processing_waits_for_current_day_digest_time(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.scheduling.digest_time = "22:00"
+            repo = build_repo(root)
+            source = create_web_source(repo)
+            message_id = self._insert_message(
+                repo,
+                source,
+                collected_at="2026-10-21T01:00:00Z",
+                content_hash="a" * 64,
+            )
+            before_due = datetime(2026, 10, 21, 13, 59, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.scheduler.utc_now", return_value=before_due
+            ):
+                result = ProcessingService(config, repo, FakeModel()).process(
+                    message_id
+                )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(self._digest_jobs(repo), [])
+
+    def test_processing_enqueues_past_day_before_digest_time(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.scheduling.digest_time = "22:00"
+            repo = build_repo(root)
+            source = create_web_source(repo)
+            message_id = self._insert_message(
+                repo,
+                source,
+                collected_at="2026-10-20T01:00:00Z",
+                content_hash="b" * 64,
+            )
+            before_due = datetime(2026, 10, 21, 13, 59, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.scheduler.utc_now", return_value=before_due
+            ):
+                ProcessingService(config, repo, FakeModel()).process(message_id)
+
+            jobs = self._digest_jobs(repo)
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(
+                json.loads(jobs[0]["payload_json"])["date"], "2026-10-20"
+            )
+
+    def test_processing_enqueues_at_digest_time_and_deduplicates(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.scheduling.digest_time = "22:00"
+            repo = build_repo(root)
+            source = create_web_source(repo)
+            message_id = self._insert_message(
+                repo,
+                source,
+                collected_at="2026-10-21T01:00:00Z",
+                content_hash="c" * 64,
+            )
+            service = ProcessingService(config, repo, FakeModel())
+            at_due = datetime(2026, 10, 21, 14, 0, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.scheduler.utc_now", return_value=at_due
+            ):
+                service.process(message_id)
+                service.process(message_id)
+
+            jobs = self._digest_jobs(repo)
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(
+                json.loads(jobs[0]["payload_json"])["date"], "2026-10-21"
+            )
+
 
 class DigestTests(unittest.TestCase):
     def test_global_range_generates_empty_days(self):
@@ -264,6 +370,33 @@ class DigestTests(unittest.TestCase):
                 [item["date"] for item in repo.list_digests(10)],
                 ["2026-09-03", "2026-09-02", "2026-09-01"],
             )
+
+    def test_generate_missing_skips_current_local_day(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.date_range.start = "2026-10-20"
+            config.date_range.end = "2026-10-21"
+            repo = build_repo(root)
+            fixed_now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.digest.utc_now", return_value=fixed_now
+            ):
+                count = DigestService(config, repo).generate_missing()
+            self.assertEqual(count, 1)
+            self.assertEqual(
+                [item["date"] for item in repo.list_digests(10)],
+                ["2026-10-20"],
+            )
+
+    def test_manual_generate_still_allows_current_day(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            repo = build_repo(root)
+            result = DigestService(config, repo).generate("2026-10-21")
+            self.assertEqual(result["date"], "2026-10-21")
+            self.assertIsNotNone(repo.get_digest("2026-10-21"))
 
     def test_digest_is_byte_idempotent(self):
         with TemporaryDirectory() as tmp:

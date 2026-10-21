@@ -57,21 +57,21 @@ class DigestService:
         }
 
     def generate_missing(self, limit_days: int = 60) -> int:
-        """Create one digest for every day in the global range."""
+        """Create missing digests for local days before today."""
         zone = self.config.system.timezone
+        today = utc_now().astimezone(local_zone(zone)).date()
         existing = {
             str(item.get("date")) for item in self.repo.list_digests(400)
         }
         range_start, range_end = self.config.effective_range()
         if range_start:
-            today = utc_now().astimezone(local_zone(zone)).date()
             try:
                 start = datetime.fromisoformat(range_start).date()
                 end = datetime.fromisoformat(range_end).date()
             except ValueError:
                 start = end = None
             if start is not None and end is not None:
-                end = min(end, today)
+                end = min(end, today - timedelta(days=1))
                 if end < start:
                     return 0
                 days = []
@@ -85,9 +85,10 @@ class DigestService:
                     self.generate(day)
                 return len(days)
         days: list[str] = []
+        today_text = today.isoformat()
         for timestamp in self.repo.recent_message_timestamps():
             day = local_date_of(timestamp, zone)
-            if day and day not in existing and day not in days:
+            if day and day < today_text and day not in existing and day not in days:
                 days.append(day)
         for day in days[:limit_days]:
             self.generate(day)

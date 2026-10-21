@@ -4,13 +4,41 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from ..config import AppConfig
 from ..repository import Repository
 from ..timeutil import local_zone, parse_datetime, utc_now
 
 log = logging.getLogger("msgdesk.scheduler")
+
+
+def _parse_digest_time(value: str) -> time | None:
+    try:
+        return datetime.strptime(value, "%H:%M").time()
+    except (TypeError, ValueError):
+        return None
+
+
+def digest_due_at(
+    config: AppConfig,
+    date_text: str,
+    now: datetime | None = None,
+) -> datetime | None:
+    """Return the local schedule time when a daily digest is due."""
+    digest_time = _parse_digest_time(config.scheduling.digest_time)
+    if digest_time is None:
+        return None
+    try:
+        digest_day = date.fromisoformat(str(date_text))
+    except (TypeError, ValueError):
+        return None
+    zone = local_zone(config.system.timezone)
+    scheduled_at = datetime.combine(digest_day, digest_time, tzinfo=zone)
+    current = now or utc_now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return scheduled_at if current.astimezone(zone) >= scheduled_at else None
 
 
 class Scheduler:
@@ -38,14 +66,16 @@ class Scheduler:
 
         local_now = now.astimezone(zone)
         today = local_now.date().isoformat()
-        digest_time = self._parse_time(self.config.scheduling.digest_time)
-        if digest_time and local_now.time() >= digest_time:
+        scheduled_at = digest_due_at(self.config, today, now=now)
+        if scheduled_at is not None:
             existing = self.repo.get_digest(today)
-            generated_today = False
+            generated_after_schedule = False
             if existing and existing.get("generated_at"):
                 generated = parse_datetime(existing["generated_at"])
-                generated_today = bool(generated and generated.astimezone(zone).date().isoformat() == today)
-            if not generated_today and not self.repo.has_active_digest_job(today):
+                generated_after_schedule = bool(
+                    generated and generated.astimezone(zone) >= scheduled_at
+                )
+            if not generated_after_schedule and not self.repo.has_active_digest_job(today):
                 created.append(
                     self.repo.enqueue_job(
                         "generate_digest", payload={"date": today}, priority=150
@@ -63,11 +93,4 @@ class Scheduler:
             except Exception:
                 log.exception("scheduler tick failed")
             stop_event.wait(max(2.0, float(self.config.scheduling.poll_seconds)))
-
-    @staticmethod
-    def _parse_time(value: str) -> time | None:
-        try:
-            return datetime.strptime(value, "%H:%M").time()
-        except (TypeError, ValueError):
-            return None
 

@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,6 +9,7 @@ from msgdesk.models import FetchResult, RawMessage, ValidationResult
 from msgdesk.services.conversation_digest import ConversationDigestService
 from msgdesk.services.digest import DigestService
 from msgdesk.services.sync import SyncService
+from msgdesk.services.worker import Worker
 from tests.test_msgdesk import build_config, build_repo
 
 
@@ -43,6 +45,14 @@ def conversation_ids(repo):
     return {row["platform_conversation_id"]: row["id"] for row in rows}
 
 
+def digest_jobs(repo):
+    return [
+        job
+        for job in repo.list_jobs(limit=50)
+        if job["type"] == "generate_digest"
+    ]
+
+
 def raw(conversation_id, name, message_id, text, published="2026-10-18T12:00:00Z"):
     return RawMessage(
         content_text=text,
@@ -56,6 +66,84 @@ def raw(conversation_id, name, message_id, text, published="2026-10-18T12:00:00Z
 
 
 class QqDigestFlowTests(unittest.TestCase):
+    def _summary_job(self, date_text, source_id="source-1"):
+        return {
+            "type": "summarize_conversation",
+            "source_id": source_id,
+            "payload_json": json.dumps(
+                {"conversation_id": "conversation-1", "date": date_text}
+            ),
+        }
+
+    def _summary_worker(self, config, repo, conversation_service):
+        return Worker(
+            repo,
+            mock.Mock(),
+            mock.Mock(),
+            DigestService(config, repo),
+            conversation_service,
+        )
+
+    def test_conversation_summary_waits_for_current_day_digest_time(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.scheduling.digest_time = "22:00"
+            repo = build_repo(root)
+            conversation_service = mock.Mock()
+            worker = self._summary_worker(config, repo, conversation_service)
+            before_due = datetime(2026, 10, 21, 13, 59, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.scheduler.utc_now", return_value=before_due
+            ):
+                worker.dispatch(self._summary_job("2026-10-21"))
+
+            conversation_service.summarize.assert_called_once_with(
+                "source-1", "conversation-1", "2026-10-21"
+            )
+            self.assertEqual(digest_jobs(repo), [])
+
+    def test_conversation_summary_enqueues_past_day_before_digest_time(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.scheduling.digest_time = "22:00"
+            repo = build_repo(root)
+            conversation_service = mock.Mock()
+            worker = self._summary_worker(config, repo, conversation_service)
+            before_due = datetime(2026, 10, 21, 13, 59, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.scheduler.utc_now", return_value=before_due
+            ):
+                worker.dispatch(self._summary_job("2026-10-20"))
+
+            jobs = digest_jobs(repo)
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(
+                json.loads(jobs[0]["payload_json"])["date"], "2026-10-20"
+            )
+
+    def test_conversation_summary_enqueues_at_digest_time_and_deduplicates(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            config.scheduling.digest_time = "22:00"
+            repo = build_repo(root)
+            conversation_service = mock.Mock()
+            worker = self._summary_worker(config, repo, conversation_service)
+            at_due = datetime(2026, 10, 21, 14, 0, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.scheduler.utc_now", return_value=at_due
+            ):
+                worker.dispatch(self._summary_job("2026-10-21"))
+                worker.dispatch(self._summary_job("2026-10-21"))
+
+            jobs = digest_jobs(repo)
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(
+                json.loads(jobs[0]["payload_json"])["date"], "2026-10-21"
+            )
+
     def test_qq_sync_queues_one_summary_per_group(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -131,6 +219,38 @@ class QqDigestFlowTests(unittest.TestCase):
             self.assertEqual(service.generate_missing(), 1)
             digests = repo.list_digests(10)
             self.assertEqual([item["date"] for item in digests], ["2026-10-18"])
+
+    def test_sync_backfill_skips_current_local_day(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = build_config(root)
+            repo = build_repo(root)
+            source = qq_source(repo)
+            messages = [
+                raw(
+                    "g1", "群一", "1", "昨天的通知",
+                    published="2026-10-20T12:00:00Z",
+                ),
+                raw(
+                    "g1", "群一", "2", "今天的通知",
+                    published="2026-10-21T01:00:00Z",
+                ),
+            ]
+            sync_service = SyncService(
+                config, repo, adapter_factory=lambda _: FakeQQAdapter(messages)
+            )
+            worker = Worker(repo, sync_service, mock.Mock(), DigestService(config, repo))
+            fixed_now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+            with mock.patch(
+                "msgdesk.services.digest.utc_now", return_value=fixed_now
+            ):
+                worker.dispatch({
+                    "type": "sync_source",
+                    "source_id": source["id"],
+                    "payload_json": "{}",
+                })
+            self.assertIsNotNone(repo.get_digest("2026-10-20"))
+            self.assertIsNone(repo.get_digest("2026-10-21"))
 
     def test_group_summary_marks_messages_processed(self):
         with TemporaryDirectory() as tmp:

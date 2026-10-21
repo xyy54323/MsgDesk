@@ -12,6 +12,7 @@ from ..repository import Repository, loads
 from .digest import DigestService
 from .conversation_digest import ConversationDigestService
 from .processing import ProcessingService
+from .scheduler import digest_due_at
 from .sync import SyncService
 from .maintenance import MaintenanceService
 
@@ -89,7 +90,10 @@ class Worker:
                 self.conversation_digest_service.summarize(
                     source_id, conversation_id, date_text
                 )
-                if not self.repo.open_digest_job_exists(date_text):
+                if (
+                    digest_due_at(self.digest_service.config, date_text) is not None
+                    and not self.repo.open_digest_job_exists(date_text)
+                ):
                     self.repo.enqueue_job(
                         "generate_digest",
                         payload={"date": date_text, "notify": False},

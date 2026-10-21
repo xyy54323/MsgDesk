@@ -31,6 +31,7 @@ from ..repository import loads
 from ..runtime import Runtime
 from ..services import autostart
 from ..services.model import ModelInput as ModelInputType, create_model_provider
+from ..services.scheduler import digest_due_at
 from ..timeutil import iso_utc, local_date_of, local_zone, parse_datetime, utc_now
 
 
@@ -298,7 +299,10 @@ class ApiRouter:
                     day = utc_now().astimezone(
                         local_zone(config.system.timezone)
                     ).date().isoformat()
-                    if not repo.has_active_digest_job(day):
+                    if (
+                        digest_due_at(config, day) is not None
+                        and not repo.has_active_digest_job(day)
+                    ):
                         repo.enqueue_job(
                             "generate_digest", payload={"date": day}, priority=150
                         )
@@ -556,7 +560,10 @@ class ApiRouter:
             day = utc_now().astimezone(
                 local_zone(config.system.timezone)
             ).date().isoformat()
-            if not repo.has_active_digest_job(day):
+            if (
+                digest_due_at(config, day) is not None
+                and not repo.has_active_digest_job(day)
+            ):
                 repo.enqueue_job("generate_digest", payload={"date": day}, priority=150)
             return 200, {"updated": len(ids), "ignored": ignored}
 
@@ -606,7 +613,10 @@ class ApiRouter:
                         day = local_date_of(
                             row["collected_at"], config.system.timezone
                         )
-                        if not repo.has_active_digest_job(day):
+                        if (
+                            digest_due_at(config, day) is not None
+                            and not repo.has_active_digest_job(day)
+                        ):
                             repo.enqueue_job(
                                 "generate_digest",
                                 payload={"date": day},
